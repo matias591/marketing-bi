@@ -11,11 +11,13 @@ if (!connectionString) {
 
 // CRITICAL — Supavisor transaction mode (port 6543) requirements (Pitfall 4):
 //  - prepare: false  → transaction mode does not support prepared statements
-//  - max: 1          → one connection per serverless invocation; the pooler holds the rest
+//  - max: 3          → small enough to stay within Supavisor's per-tenant pool
+//                       on free tier, large enough that Promise.all of dashboard
+//                       queries doesn't serialize over a single connection
 //  - idle_timeout: 20→ release fast on Vercel's short-lived functions
 const queryClient = postgres(connectionString, {
   prepare: false,
-  max: 1,
+  max: 3,
   idle_timeout: 20,
   connect_timeout: 10,
 });

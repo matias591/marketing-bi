@@ -13,6 +13,7 @@ import { parseFilters, parseTypeFilter, resolveDateRange } from "@/lib/dashboard
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 30;
 export const metadata = { title: "Campaigns · Marketing BI" };
 
 export default async function CampaignsPage({
