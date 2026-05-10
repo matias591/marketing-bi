@@ -10,16 +10,26 @@ if (!connectionString) {
 }
 
 // CRITICAL — Supavisor transaction mode (port 6543) requirements (Pitfall 4):
-//  - prepare: false  → transaction mode does not support prepared statements
-//  - max: 3          → small enough to stay within Supavisor's per-tenant pool
+//  - prepare: false   → transaction mode does not support prepared statements
+//  - max: 3           → small enough to stay within Supavisor's per-tenant pool
 //                       on free tier, large enough that Promise.all of dashboard
 //                       queries doesn't serialize over a single connection
-//  - idle_timeout: 20→ release fast on Vercel's short-lived functions
+//  - idle_timeout: 5  → close idle conns fast. Vercel may freeze the function
+//                       between requests; connections idle longer than this
+//                       have likely been silently dropped by Supavisor and
+//                       will hang on reuse.
+//  - max_lifetime: 60 → forcibly recycle every connection after 60s. Backup
+//                       safety net for the same stale-connection issue.
+//  - connection.application_name → visible in pg_stat_activity for debugging
 const queryClient = postgres(connectionString, {
   prepare: false,
   max: 3,
-  idle_timeout: 20,
+  idle_timeout: 5,
+  max_lifetime: 60,
   connect_timeout: 10,
+  connection: {
+    application_name: "marketing-bi",
+  },
 });
 
 export const db = drizzle(queryClient, {
