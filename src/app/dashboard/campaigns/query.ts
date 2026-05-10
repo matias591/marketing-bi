@@ -1,23 +1,17 @@
 /**
- * Campaign Contribution to SQLs — Phase 1 query.
+ * Campaign Contribution to SQLs — Phase 3 query.
  *
- * Computes, for each Campaign, the count of distinct Contacts whose
- * `sql_date` falls AFTER they became a CampaignMember. Phase 1 uses a
- * hand-written CTE against `raw.sf_*`. Phase 3 will replace this with
- * `mart.attribution_contact` reads, with the full 90-day window + per-stage
- * independence + first/last/linear logic.
+ * Reads from `mart.attribution_contact` (the methodology-locked attribution
+ * model) instead of Phase 1's hand-written SQL against raw.sf_*. The chart
+ * shows distinct Contact count credited to each Campaign at the SQL stage
+ * under the linear multi-touch model. Toggle to first/last/linear in P4.
  *
- * Naive Phase 1 semantics (linear-ish, no model toggle):
- *   - Filter out soft-deleted records (Pitfall 12).
- *   - Filter to Contacts where `sql_date IS NOT NULL`.
- *   - Join to CampaignMember rows where the touchpoint timestamp
- *     (COALESCE(first_responded_date, created_date)) is strictly < sql_date.
- *   - Count distinct Contacts per Campaign — this is the "contribution".
- *   - Top-N by count, descending.
- *
- * This intentionally undercounts vs. the eventual P3 marts (no 90-day window,
- * no per-stage credit). Phase 1's job is to PROVE the pipeline; the
- * methodology page (P3) will document the production semantics.
+ * Phase 1's naive "any touchpoint before sql_date" rule is replaced by:
+ *   - 90-day window strictly before sql_date (ATTR-04, ATTR-06)
+ *   - Per-stage independent credit (ATTR-07) — this query asks for SQL stage
+ *   - Linear-multi-touch credit per touchpoint (ATTR-04)
+ *   - Soft-delete filter at the Contact level (ATTR-10)
+ *   - All CampaignMember statuses (ATTR-05)
  */
 import { db } from "@/db";
 import { sql } from "drizzle-orm";
@@ -27,50 +21,35 @@ export interface CampaignContributionRow {
   campaignName: string | null;
   campaignType: string | null;
   sqlContacts: number;
+  totalCredit: number;
 }
+
+export type AttributionModel = "first_touch" | "last_touch" | "linear";
 
 export async function getCampaignContributionToSqls(
   topN = 20,
+  model: AttributionModel = "linear",
 ): Promise<CampaignContributionRow[]> {
   const rows = await db.execute<{
     campaign_id: string;
     campaign_name: string | null;
     campaign_type: string | null;
     sql_contacts: string | number;
+    total_credit: string | number;
   }>(sql`
-    WITH valid_contacts AS (
-      SELECT id, sql_date
-      FROM raw.sf_contact
-      WHERE NOT is_deleted
-        AND sql_date IS NOT NULL
-    ),
-    valid_members AS (
-      SELECT
-        cm.contact_id,
-        cm.campaign_id,
-        COALESCE(cm.first_responded_date, cm.created_date::date) AS touchpoint_at
-      FROM raw.sf_campaign_member cm
-      WHERE NOT cm.is_deleted
-        AND cm.contact_id IS NOT NULL
-    ),
-    credited AS (
-      SELECT DISTINCT vm.campaign_id, vm.contact_id
-      FROM valid_members vm
-      JOIN valid_contacts vc
-        ON vc.id = vm.contact_id
-      WHERE vm.touchpoint_at < vc.sql_date
-    )
     SELECT
-      c.id        AS campaign_id,
-      c.name      AS campaign_name,
-      c.type      AS campaign_type,
-      COUNT(DISTINCT cr.contact_id) AS sql_contacts
+      c.id          AS campaign_id,
+      c.name        AS campaign_name,
+      c.type        AS campaign_type,
+      COUNT(DISTINCT a.contact_id)     AS sql_contacts,
+      COALESCE(SUM(a.credit), 0)::numeric AS total_credit
     FROM raw.sf_campaign c
-    LEFT JOIN credited cr ON cr.campaign_id = c.id
+    LEFT JOIN mart.attribution_contact a
+      ON a.campaign_id = c.id AND a.stage = 'sql' AND a.model = ${model}
     WHERE NOT c.is_deleted
     GROUP BY c.id, c.name, c.type
-    HAVING COUNT(DISTINCT cr.contact_id) > 0
-    ORDER BY sql_contacts DESC, c.name ASC
+    HAVING COUNT(DISTINCT a.contact_id) > 0
+    ORDER BY total_credit DESC, c.name ASC
     LIMIT ${topN}
   `);
 
@@ -79,10 +58,12 @@ export async function getCampaignContributionToSqls(
     campaign_name: string | null;
     campaign_type: string | null;
     sql_contacts: string | number;
+    total_credit: string | number;
   }>).map((r) => ({
     campaignId: r.campaign_id,
     campaignName: r.campaign_name,
     campaignType: r.campaign_type,
     sqlContacts: Number(r.sql_contacts),
+    totalCredit: Number(r.total_credit),
   }));
 }

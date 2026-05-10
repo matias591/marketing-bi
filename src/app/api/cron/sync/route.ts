@@ -109,8 +109,31 @@ async function runSync({ triggeredBy }: RunOptions) {
       }
     }
 
+    // 5b. Refresh attribution marts (Phase 3) — only when at least some
+    //     extracts succeeded. CONCURRENTLY keeps the dashboards queryable.
+    if (errors.length < SF_OBJECTS.length) {
+      log("refreshing marts");
+      try {
+        await sql.unsafe(`REFRESH MATERIALIZED VIEW CONCURRENTLY mart.lifecycle_transitions`);
+        await sql.unsafe(`REFRESH MATERIALIZED VIEW CONCURRENTLY mart.touchpoints`);
+        await sql.unsafe(`REFRESH MATERIALIZED VIEW CONCURRENTLY mart.attribution_contact`);
+        await sql.unsafe(`REFRESH MATERIALIZED VIEW CONCURRENTLY mart.attribution_account`);
+        log("marts refreshed");
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        // Log but don't fail the run — raw layer is still good even if marts didn't refresh.
+        // /admin/sync (P6) will surface this; for now it shows up in sync_errors.
+        await sql`
+          INSERT INTO ops.sync_errors (run_id, object_name, error_code, message, raw_error)
+          VALUES (${runId}, 'mart_refresh', 'REFRESH_FAILED', ${message}, ${sql.json({ message } as unknown as postgres.JSONValue)})
+        `;
+        log("mart refresh failed", { error: message });
+        errors.push({ object: "mart_refresh", message });
+      }
+    }
+
     // 6. Close out.
-    const status = errors.length === 0 ? "success" : errors.length === SF_OBJECTS.length ? "failed" : "partial";
+    const status = errors.length === 0 ? "success" : errors.length >= SF_OBJECTS.length ? "failed" : "partial";
     await sql`
       UPDATE ops.sync_runs
          SET finished_at = now(),

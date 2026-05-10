@@ -57,3 +57,5 @@ sf-jwt.private.pem
 
 # pnpm
 .pnpm-store
+.env.vercel
+vercel-env-import.txt

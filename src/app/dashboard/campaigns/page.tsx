@@ -7,17 +7,17 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "Campaigns · Marketing BI" };
 
 export default async function CampaignsPage() {
-  const rows = await getCampaignContributionToSqls(20);
+  const rows = await getCampaignContributionToSqls(20, "linear");
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
       <header>
         <h1 className="text-xl font-semibold tracking-tight">Campaign Contribution to SQLs</h1>
         <p className="mt-1 text-sm text-(--color-text-muted)">
-          Number of distinct Contacts who became SQL after touching each campaign.
-          Phase 1 uses simple "touchpoint before SQL" semantics — the full attribution
-          model (90-day window, per-stage credit, first / last / linear toggle) ships in
-          Phase 3 with the methodology page.
+          Linear multi-touch credit per campaign at the SQL stage. Each Contact's credit is
+          split equally across all campaigns they touched within 90 days strictly before their
+          SQL transition. Bar shows total credit; the count below shows distinct contributing Contacts.
+          See <a className="underline" href="/methodology">methodology</a> for full details.
         </p>
       </header>
 
@@ -25,16 +25,12 @@ export default async function CampaignsPage() {
         <CardHeader>
           <CardTitle>Top {rows.length} campaigns</CardTitle>
           <CardDescription>
-            Sourced live from <code>raw.sf_campaign</code>, <code>raw.sf_contact</code>,{" "}
-            <code>raw.sf_campaign_member</code>. Soft-deleted records are filtered out.
+            Source: <code>mart.attribution_contact</code> (linear model, SQL stage). Refreshed at
+            the end of every cron sync run.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {rows.length === 0 ? (
-            <EmptyState />
-          ) : (
-            <CampaignBarChart data={rows} />
-          )}
+          {rows.length === 0 ? <EmptyState /> : <CampaignBarChart data={rows} />}
         </CardContent>
       </Card>
     </div>
@@ -46,10 +42,10 @@ function EmptyState() {
     <div className="flex flex-col items-center justify-center gap-3 rounded-md border border-dashed bg-(--color-surface) py-16 text-center">
       <p className="text-sm font-medium">No data yet.</p>
       <p className="max-w-sm text-xs text-(--color-text-muted)">
-        Either no sync has run, or no Contacts have <code>sql_date</code> set in
-        Salesforce. Trigger a manual sync via{" "}
-        <code className="rounded bg-(--color-surface-2) px-1">POST /api/cron/sync</code>{" "}
-        with the cron secret, or wait for the weekly cron.
+        Either no sync has run, the marts haven't been refreshed, or no Contacts have touchpoints
+        within the 90-day window before their SQL transition. Run{" "}
+        <code className="rounded bg-(--color-surface-2) px-1">POST /api/cron/sync</code> with the
+        cron secret to sync + refresh, or wait for the weekly cron.
       </p>
     </div>
   );
