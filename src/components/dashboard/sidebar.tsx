@@ -15,7 +15,7 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { href: "/dashboard/campaigns", label: "Campaigns (G1)", icon: BarChart3, enabled: true },
-  { href: "/dashboard/revenue", label: "Revenue (G4)", icon: Coins, enabled: false, comingSoon: true },
+  { href: "/dashboard/revenue", label: "Revenue (G4)", icon: Coins, enabled: true },
   { href: "/dashboard/journey", label: "Contact Journey (G2)", icon: Route, enabled: false, comingSoon: true },
   { href: "/dashboard/accounts", label: "Accounts (G3)", icon: Building2, enabled: false, comingSoon: true },
   { href: "/dashboard/depth", label: "Touchpoint Depth (G5)", icon: Layers, enabled: false, comingSoon: true },

@@ -118,6 +118,7 @@ async function runSync({ triggeredBy }: RunOptions) {
         await sql.unsafe(`REFRESH MATERIALIZED VIEW CONCURRENTLY mart.touchpoints`);
         await sql.unsafe(`REFRESH MATERIALIZED VIEW CONCURRENTLY mart.attribution_contact`);
         await sql.unsafe(`REFRESH MATERIALIZED VIEW CONCURRENTLY mart.attribution_account`);
+        await sql.unsafe(`REFRESH MATERIALIZED VIEW CONCURRENTLY mart.opportunity_credit`);
         log("marts refreshed");
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
