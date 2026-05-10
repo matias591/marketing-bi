@@ -119,6 +119,14 @@ async function runSync({ triggeredBy }: RunOptions) {
         await sql.unsafe(`REFRESH MATERIALIZED VIEW CONCURRENTLY mart.attribution_contact`);
         await sql.unsafe(`REFRESH MATERIALIZED VIEW CONCURRENTLY mart.attribution_account`);
         await sql.unsafe(`REFRESH MATERIALIZED VIEW CONCURRENTLY mart.opportunity_credit`);
+        // ANALYZE so the query planner has fresh stats; CONCURRENTLY refresh
+        // doesn't trigger autovacuum, so without this the planner can pick
+        // bad plans on the fresh data and dashboard queries hang.
+        await sql.unsafe(`ANALYZE mart.lifecycle_transitions`);
+        await sql.unsafe(`ANALYZE mart.touchpoints`);
+        await sql.unsafe(`ANALYZE mart.attribution_contact`);
+        await sql.unsafe(`ANALYZE mart.attribution_account`);
+        await sql.unsafe(`ANALYZE mart.opportunity_credit`);
         log("marts refreshed");
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
