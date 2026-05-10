@@ -55,10 +55,16 @@ export const SF_OBJECTS: SfObjectDef[] = [
   {
     name: "Contact",
     destTable: "raw.sf_contact",
-    // ⚠ Custom field API names below are best-guess from PROJECT.md / CLAUDE.md.
-    // VERIFY against your SF org before first sync. Run:
-    //   node -e "import('./src/lib/sf/jwt.js').then(...)"
-    // or use jsforce REPL to call describe('Contact') and confirm.
+    // Field API names verified against the live Orca SF org via
+    // scripts/sf-describe.ts. Lifecycle transition dates other than
+    // SQL_Date__c (MQL / Opportunity / Customer) don't exist as custom fields
+    // in this org — Phase 3 will need to backfill them from Field History
+    // Tracking on Lifecycle_Stage__c (or from Opportunity/Presentation events).
+    // For now we leave the corresponding columns null in raw.sf_contact.
+    //
+    // Source fields:
+    //   - LeadSource (standard field) is the "original source" equivalent
+    //   - Last_Lead_Source__c (custom) is the "latest source" equivalent
     fields: [
       "Id",
       "AccountId",
@@ -66,12 +72,9 @@ export const SF_OBJECTS: SfObjectDef[] = [
       "FirstName",
       "LastName",
       "Lifecycle_Stage__c",
-      "MQL_Date__c",
       "SQL_Date__c",
-      "Opportunity_Date__c",
-      "Customer_Date__c",
-      "Original_Source__c",
-      "Latest_Source__c",
+      "LeadSource",
+      "Last_Lead_Source__c",
       "IsDeleted",
       "CreatedDate",
       "LastModifiedDate",
@@ -85,12 +88,12 @@ export const SF_OBJECTS: SfObjectDef[] = [
       first_name: sfString(r.FirstName),
       last_name: sfString(r.LastName),
       lifecycle_stage: sfString(r.Lifecycle_Stage__c),
-      mql_date: sfDate(r.MQL_Date__c),
+      mql_date: null,
       sql_date: sfDate(r.SQL_Date__c),
-      opportunity_date: sfDate(r.Opportunity_Date__c),
-      customer_date: sfDate(r.Customer_Date__c),
-      original_source: sfString(r.Original_Source__c),
-      latest_source: sfString(r.Latest_Source__c),
+      opportunity_date: null,
+      customer_date: null,
+      original_source: sfString(r.LeadSource),
+      latest_source: sfString(r.Last_Lead_Source__c),
       is_deleted: sfBool(r.IsDeleted),
       created_date: sfTimestamp(r.CreatedDate),
       last_modified_date: sfTimestamp(r.LastModifiedDate),
@@ -228,10 +231,12 @@ export const SF_OBJECTS: SfObjectDef[] = [
   {
     name: "Presentation__c",
     destTable: "raw.sf_presentation",
-    // Custom object: assumed fields. Verify via describe() before first sync.
+    // Verified field names. The contact reference's API name is
+    // `Primary_Contract__c` despite the user-facing label "Primary Contact"
+    // (an existing typo in the org's schema). We use the API name as-is.
     fields: [
       "Id",
-      "Contact__c",
+      "Primary_Contract__c",
       "Name",
       "Status__c",
       "IsDeleted",
@@ -242,7 +247,7 @@ export const SF_OBJECTS: SfObjectDef[] = [
     useBulkApi: false,
     mapRow: (r) => ({
       id: sfString(r.Id),
-      contact_id: sfString(r.Contact__c),
+      contact_id: sfString(r.Primary_Contract__c),
       name: sfString(r.Name),
       status: sfString(r.Status__c),
       is_deleted: sfBool(r.IsDeleted),
