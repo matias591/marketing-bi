@@ -32,38 +32,42 @@ Locked by research (Pitfalls 13, 15 — `.planning/research/PITFALLS.md`):
 
 ## Phase Details
 
-### Phase 1: Vertical Slice + Auth Foundation
-**Goal:** Marketing director can open a deployed URL, sign in with email + password, and see one chart of attribution data (seeded/stubbed) — proves end-to-end flow before any sync work.
+### Phase 1: Vertical Slice + Auth Foundation ✅ Done — 2026-05-10
+**Goal:** Deployed Vercel app where an admin (`matias@orca-ai.io`) and invited users sign in with email/password, a weekly Vercel Cron pulls all 7 Salesforce objects into `raw.sf_*`, and `/dashboard/campaigns` renders a bar chart of "Campaign Contribution to SQLs" from real Salesforce data.
 **Mode:** mvp
 **Depends on:** Nothing (first phase)
-**Requirements:** AUTH-01, AUTH-03, AUTH-04, AUTH-05, PLAT-12
+**Requirements:** AUTH-01, AUTH-03, AUTH-04, AUTH-05, PLAT-12, **DATA-01, DATA-02, DATA-03, DATA-04, DATA-05, DATA-06, DATA-08, DATA-09, DATA-10, DATA-11, DATA-13** (last 11 pulled forward from original P2 — see CONTEXT.md scope-shift note)
 **Success Criteria** (what must be TRUE):
-  1. A deployed Vercel URL exists; visiting any `/dashboard/*` route while signed-out redirects to `/login`.
-  2. A user with an allowlisted email domain can sign up and sign in with email + password; the session persists across browser refresh via `@supabase/ssr` HTTP-only cookies.
-  3. A user with a non-allowlisted email domain is rejected at the database layer (Postgres trigger on `auth.users` insert raises an exception); rejection is not just frontend-checked.
-  4. A "Campaign Contribution to SQLs" page exists and renders a bar chart from a seed fixture (no live sync yet) — proves the Server Component → Postgres → ECharts pipeline works end-to-end.
-  5. All API routes that touch the DB explicitly declare `runtime = 'nodejs'`; the build does not include any Edge-runtime DB code.
-**Plans:** TBD
+  1. A deployed Vercel URL exists; visiting any `/dashboard/*` route while signed-out redirects to `/login`. ✅
+  2. A user with an allowlisted email domain (invite-only model — admin pre-creates in Supabase Studio) can sign in with email + password; the session persists across browser refresh via `@supabase/ssr` HTTP-only cookies. ✅
+  3. A user with a non-allowlisted email domain is rejected at the database layer (Postgres trigger on `auth.users` insert raises an exception); rejection is not just frontend-checked. ✅
+  4. A "Campaign Contribution to SQLs" page exists and renders a bar chart **from live Salesforce data via the weekly cron pipeline** (replaces the original "seed fixture" criterion — user chose live SF data during discuss-phase). ✅
+  5. All API routes that touch the DB or Salesforce explicitly declare `runtime = 'nodejs'`; the build does not include any Edge-runtime DB or jsforce code. ✅
+  6. Weekly Vercel Cron (`0 6 * * 0`) pulls all 7 SF objects (Contact, Account, Campaign, CampaignMember, Opportunity, OpportunityContactRole, Presentation__c) into `raw.sf_*` via OAuth 2.0 JWT Bearer Flow + `@jsforce/jsforce-node`. ✅
+  7. `ops.contact_source_history` and `ops.campaigns_history` are populated on every cron run from the FIRST run (Pitfall 6 / 16); `ops.sync_runs` + `ops.sync_errors` record run lifecycle. ✅
+**Plans:** Direct execution from CONTEXT.md (no PLAN.md — built inline alongside the user)
 **UI hint**: yes
 
-### Phase 2: Production Sync Infrastructure
-**Goal:** A daily Vercel Cron pipeline pulls every required Salesforce object into `raw.sf_*` Postgres tables incrementally, snapshots historically-volatile fields on every run, refreshes downstream marts atomically, and surfaces failures via Slack — the data foundation that every dashboard reads from.
+### Phase 2: Production Sync Polish (was: Production Sync Infrastructure)
+**Goal:** Promote the weekly cron from Phase 1 to production-grade daily operation — daily cadence with object-staggered cron entries, full historical backfill before incremental kicks in, Slack alerts on failure, robust `INVALID_FIELD` strip-and-retry resilience, the `/admin/sync` operations view, and the cron-secret hardening guarantees. The sync infrastructure itself shipped in Phase 1; this phase makes it operationally bulletproof.
 **Mode:** mvp
 **Depends on:** Phase 1
-**Requirements:** AUTH-06, DATA-01, DATA-02, DATA-03, DATA-04, DATA-05, DATA-06, DATA-07, DATA-08, DATA-09, DATA-10, DATA-11, DATA-12, DATA-13, DATA-15
+**Requirements:** AUTH-06, DATA-07 (atomic mart refresh — couples to Phase 3 marts), DATA-12 (full INVALID_FIELD resilience), DATA-14 (Slack alerts — pulled in from original P6), DATA-15 (one-shot backfill), PLAT-11 (`/admin/sync` page — pulled in from original P6)
 **Success Criteria** (what must be TRUE):
-  1. Vercel Cron (Hobby plan, one-per-day-per-object, staggered by hour) pulls Contact, Account, Campaign, CampaignMember, Opportunity, OpportunityContactRole, and `Presentation__c` into `raw.sf_*` tables 1:1 with Salesforce schema; upserts are idempotent on Salesforce Id.
-  2. CampaignMember (and any object with >5K row delta) extracts via Bulk API 2.0; tiny objects via REST `query`; Contact / Account / CampaignMember use `queryAll` so soft-deletes are mirrored, not silently dropped.
-  3. Per-object watermarks (`max LastModifiedDate`) drive incremental extraction and only advance after a successful load; a failure on one object's `INVALID_FIELD` does not abort the whole sync — the field is logged and the object resyncs without it.
-  4. After all extracts succeed, marts in `mart.*` are refreshed via `REFRESH MATERIALIZED VIEW CONCURRENTLY` (atomic at the run level); on any extract failure, marts retain prior day's data.
-  5. `ops.contact_source_history` and `ops.campaigns_history` are populated on every sync from the FIRST cron run forward; `ops.sync_runs` and `ops.sync_errors` record run lifecycle and per-object errors; a keep-alive query at the start of every cron prevents Supabase free-tier auto-pause.
-  6. A one-shot backfill script runs from a developer laptop (not from cron) and loads the historical dataset before the first cron-driven incremental run; cron routes verify `Authorization: Bearer $CRON_SECRET` and reject unauthenticated requests.
+  1. Cron schedule promotes from weekly (`0 6 * * 0`) to daily one-per-day-per-object, staggered by hour (Vercel Hobby plan compatible).
+  2. A one-shot backfill script (run from a developer laptop, not from cron) loads the full historical dataset before the first daily-incremental run advances watermarks.
+  3. `INVALID_FIELD` errors on one object don't abort the whole sync — affected field is logged to `ops.sync_errors` and the object resyncs without that field on the next run.
+  4. After all extracts succeed, marts in `mart.*` (built in Phase 3) are refreshed via `REFRESH MATERIALIZED VIEW CONCURRENTLY` atomically per run; on extract failure, marts retain prior day's data.
+  5. Sync failures post to a Slack incoming webhook (URL in env var); empty webhook = silent (logs only).
+  6. `/admin/sync` page (admin-only) reads `ops.sync_runs` + `ops.sync_errors` and renders the last 30 days of run history.
+  7. `AUTH-06`: cron route's `Authorization: Bearer ${CRON_SECRET}` check is exercised by an end-to-end test, not just the live curl invocation done in P1.
 **Plans:** TBD
+**Note:** This phase can run in parallel with or after Phase 3, since the daily-cron and mart-refresh pieces depend on the marts existing. Recommended ordering: P3 marts first → P2 daily promotion + mart refresh together.
 
 ### Phase 3: Attribution Engine
 **Goal:** The marts that compute first-touch, last-touch, and linear multi-touch attribution at Contact and Account level — with methodology locked in (90-day window, per-stage independent credit, strict `<` boundary, touchpoint dedupe, soft-delete filter, OCR equal split) and a methodology page that the marketing director has signed off before any dashboard ships.
 **Mode:** mvp
-**Depends on:** Phase 2
+**Depends on:** Phase 1 (sync infrastructure already running; Phase 2 daily-promotion can run in parallel or after this phase)
 **Requirements:** ATTR-01, ATTR-02, ATTR-03, ATTR-04, ATTR-05, ATTR-06, ATTR-07, ATTR-08, ATTR-09, ATTR-10, ATTR-11, ATTR-12, ATTR-13
 **Success Criteria** (what must be TRUE):
   1. `mart.touchpoints` materialized view contains one row per (Contact, Campaign) pair (deduped on `(contact_id, campaign_id)`); touchpoint timestamp is `COALESCE(first_responded_date, created_date)` of the earliest CampaignMember row; all CampaignMember statuses are included (not filtered to "Responded").
@@ -119,9 +123,9 @@ Locked by research (Pitfalls 13, 15 — `.planning/research/PITFALLS.md`):
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Vertical Slice + Auth Foundation | 0/? | Not started | — |
-| 2. Production Sync Infrastructure | 0/? | Not started | — |
-| 3. Attribution Engine | 0/? | Not started | — |
+| 1. Vertical Slice + Auth Foundation | n/a (direct exec) | ✅ Done | 2026-05-10 |
+| 2. Production Sync Polish | 0/? | Not started (deferred — see Phase 3 dependency note) | — |
+| 3. Attribution Engine | 0/? | Not started — **next up** | — |
 | 4. G1 + G4 Dashboards (Campaign + Revenue) | 0/? | Not started | — |
 | 5. G2 + G3 Dashboards (Journey + Accounts) | 0/? | Not started | — |
 | 6. Launch Surface (G5 + Polish + SSO) | 0/? | Not started | — |
