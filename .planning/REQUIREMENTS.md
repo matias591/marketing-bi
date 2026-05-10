@@ -122,17 +122,77 @@ Backlog — acknowledged but not in current roadmap.
 
 ## Traceability
 
-Empty initially. Roadmapper populates this during `/gsd-plan-phase` and phase execution updates the status.
+Populated by roadmapper on 2026-05-10. Status updates as phases execute.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (To be filled by roadmapper) | — | Pending |
+| AUTH-01 | Phase 1 | Pending |
+| AUTH-02 | Phase 6 | Pending |
+| AUTH-03 | Phase 1 | Pending |
+| AUTH-04 | Phase 1 | Pending |
+| AUTH-05 | Phase 1 | Pending |
+| AUTH-06 | Phase 2 | Pending |
+| DATA-01 | Phase 2 | Pending |
+| DATA-02 | Phase 2 | Pending |
+| DATA-03 | Phase 2 | Pending |
+| DATA-04 | Phase 2 | Pending |
+| DATA-05 | Phase 2 | Pending |
+| DATA-06 | Phase 2 | Pending |
+| DATA-07 | Phase 2 | Pending |
+| DATA-08 | Phase 2 | Pending |
+| DATA-09 | Phase 2 | Pending |
+| DATA-10 | Phase 2 | Pending |
+| DATA-11 | Phase 2 | Pending |
+| DATA-12 | Phase 2 | Pending |
+| DATA-13 | Phase 2 | Pending |
+| DATA-14 | Phase 6 | Pending |
+| DATA-15 | Phase 2 | Pending |
+| ATTR-01 | Phase 3 | Pending |
+| ATTR-02 | Phase 3 | Pending |
+| ATTR-03 | Phase 3 | Pending |
+| ATTR-04 | Phase 3 | Pending |
+| ATTR-05 | Phase 3 | Pending |
+| ATTR-06 | Phase 3 | Pending |
+| ATTR-07 | Phase 3 | Pending |
+| ATTR-08 | Phase 3 | Pending |
+| ATTR-09 | Phase 3 | Pending |
+| ATTR-10 | Phase 3 | Pending |
+| ATTR-11 | Phase 3 | Pending |
+| ATTR-12 | Phase 3 | Pending |
+| ATTR-13 | Phase 3 | Pending |
+| DASH-01 | Phase 4 | Pending |
+| DASH-02 | Phase 4 | Pending |
+| DASH-03 | Phase 4 | Pending |
+| DASH-04 | Phase 4 | Pending |
+| DASH-05 | Phase 5 | Pending |
+| DASH-06 | Phase 5 | Pending |
+| DASH-07 | Phase 5 | Pending |
+| DASH-08 | Phase 5 | Pending |
+| DASH-09 | Phase 6 | Pending |
+| DASH-10 | Phase 5 | Pending |
+| DASH-11 | Phase 6 | Pending |
+| DASH-12 | Phase 4 | Pending |
+| DASH-13 | Phase 4 | Pending |
+| PLAT-01 | Phase 4 | Pending |
+| PLAT-02 | Phase 4 | Pending |
+| PLAT-03 | Phase 4 | Pending |
+| PLAT-04 | Phase 4 | Pending |
+| PLAT-05 | Phase 4 | Pending |
+| PLAT-06 | Phase 4 | Pending |
+| PLAT-07 | Phase 6 | Pending |
+| PLAT-08 | Phase 4 | Pending |
+| PLAT-09 | Phase 5 | Pending |
+| PLAT-10 | Phase 5 | Pending |
+| PLAT-11 | Phase 6 | Pending |
+| PLAT-12 | Phase 1 | Pending |
 
 **Coverage (set after roadmap creation):**
 - v1 requirements: 59 total (6 AUTH + 15 DATA + 13 ATTR + 13 DASH + 12 PLAT)
-- Mapped to phases: TBD
-- Unmapped: TBD
+- Mapped to phases: 59 / 59 ✓
+- Unmapped: 0
+- Per-phase totals: P1=5, P2=15, P3=13, P4=13, P5=7, P6=6 (sum = 59)
 
 ---
 *Requirements defined: 2026-05-10*
-*Last updated: 2026-05-10 after initial definition*
+*Traceability populated: 2026-05-10 by roadmapper*
+*Last updated: 2026-05-10 after roadmap creation*
