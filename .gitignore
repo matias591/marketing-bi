@@ -52,6 +52,8 @@ next-env.d.ts
 # Salesforce private key (must never be committed)
 *.key
 sf-jwt.private.pem
+# Public cert (already uploaded to SF; no value in committing it)
+*.crt
 
 # pnpm
 .pnpm-store
