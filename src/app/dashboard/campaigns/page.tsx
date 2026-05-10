@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { FilterBar } from "@/components/dashboard/filter-bar";
 import { CampaignBarChart } from "./campaign-bar-chart";
@@ -9,12 +10,19 @@ import {
   getCampaignTypeRollup,
   getConversionRateTable,
 } from "./query";
-import { parseFilters, parseTypeFilter, resolveDateRange } from "@/lib/dashboard-filters";
+import { parseFilters, parseTypeFilter, resolveDateRange, type DashboardFilters } from "@/lib/dashboard-filters";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 export const metadata = { title: "Campaigns · Marketing BI" };
+
+interface QueryArgs {
+  model: DashboardFilters["model"];
+  fromDate: string | null;
+  toDate: string | null;
+  campaignTypes: string[] | null;
+}
 
 export default async function CampaignsPage({
   searchParams,
@@ -26,19 +34,17 @@ export default async function CampaignsPage({
   const dateRange = resolveDateRange(filters);
   const types = parseTypeFilter(filters.types);
 
-  const queryArgs = {
+  const queryArgs: QueryArgs = {
     model: filters.model,
     fromDate: dateRange.from,
     toDate: dateRange.to,
     campaignTypes: types,
   };
 
-  const [topCampaigns, typeRollup, conversion, availableTypes] = await Promise.all([
-    getCampaignContributionToSqls(queryArgs, 20),
-    getCampaignTypeRollup(queryArgs),
-    getConversionRateTable(queryArgs, 50),
-    getAvailableCampaignTypes(),
-  ]);
+  // Re-keying every section by the active filter set forces fresh Suspense
+  // boundaries on every navigation; without this, React would try to reuse
+  // the previous render and queries can stall on the prior result.
+  const filterKey = JSON.stringify(queryArgs);
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-5">
@@ -50,58 +56,116 @@ export default async function CampaignsPage({
         </p>
       </header>
 
-      <FilterBar
-        model={filters.model}
-        preset={filters.preset}
-        types={types}
-        availableTypes={availableTypes}
-      />
+      <Suspense fallback={<FilterBarSkeleton />}>
+        <FilterBarSection
+          model={filters.model}
+          preset={filters.preset}
+          types={types}
+        />
+      </Suspense>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Top {topCampaigns.length} campaigns</CardTitle>
-          <CardDescription>
-            Source: <code>mart.attribution_contact</code> · model <strong>{filters.model.replace("_", "-")}</strong>
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {topCampaigns.length === 0 ? (
-            <EmptyState />
-          ) : (
-            <CampaignBarChart data={topCampaigns} />
-          )}
-        </CardContent>
-      </Card>
+      <Suspense key={`top-${filterKey}`} fallback={<ChartCardSkeleton title="Top campaigns" />}>
+        <TopCampaignsCard args={queryArgs} />
+      </Suspense>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Credit by campaign type</CardTitle>
-          <CardDescription>
-            Same model and date range, rolled up by campaign type.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {typeRollup.length === 0 ? (
-            <EmptyState />
-          ) : (
-            <CampaignTypeChart data={typeRollup} />
-          )}
-        </CardContent>
-      </Card>
+      <Suspense key={`type-${filterKey}`} fallback={<ChartCardSkeleton title="Credit by campaign type" />}>
+        <TypeRollupCard args={queryArgs} />
+      </Suspense>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Engagement → SQL conversion rate</CardTitle>
-          <CardDescription>
-            Distinct contacts touched by the campaign, vs. those who later became SQL within the
-            current filter window. Click column headers to re-sort.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="p-0">
-          <ConversionRateTable data={conversion} />
-        </CardContent>
-      </Card>
+      <Suspense key={`conv-${filterKey}`} fallback={<ChartCardSkeleton title="Engagement → SQL conversion rate" />}>
+        <ConversionRateCard args={queryArgs} />
+      </Suspense>
     </div>
+  );
+}
+
+// Each section is its own async server component → Suspense streams them
+// independently. The page returns to the browser before any of these resolve;
+// each card renders as its query completes.
+
+async function FilterBarSection({
+  model,
+  preset,
+  types,
+}: {
+  model: DashboardFilters["model"];
+  preset: DashboardFilters["preset"];
+  types: string[] | null;
+}) {
+  const availableTypes = await getAvailableCampaignTypes();
+  return (
+    <FilterBar model={model} preset={preset} types={types} availableTypes={availableTypes} />
+  );
+}
+
+async function TopCampaignsCard({ args }: { args: QueryArgs }) {
+  const rows = await getCampaignContributionToSqls(args, 20);
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Top {rows.length} campaigns</CardTitle>
+        <CardDescription>
+          Source: <code>mart.attribution_contact</code> · model{" "}
+          <strong>{args.model.replace("_", "-")}</strong>
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {rows.length === 0 ? <EmptyState /> : <CampaignBarChart data={rows} />}
+      </CardContent>
+    </Card>
+  );
+}
+
+async function TypeRollupCard({ args }: { args: QueryArgs }) {
+  const rows = await getCampaignTypeRollup(args);
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Credit by campaign type</CardTitle>
+        <CardDescription>Same model and date range, rolled up by campaign type.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {rows.length === 0 ? <EmptyState /> : <CampaignTypeChart data={rows} />}
+      </CardContent>
+    </Card>
+  );
+}
+
+async function ConversionRateCard({ args }: { args: QueryArgs }) {
+  const rows = await getConversionRateTable(args, 50);
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Engagement → SQL conversion rate</CardTitle>
+        <CardDescription>
+          Distinct contacts touched by the campaign vs. those who later became SQL within the
+          current filter window. Click column headers to re-sort.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="p-0">
+        <ConversionRateTable data={rows} />
+      </CardContent>
+    </Card>
+  );
+}
+
+function FilterBarSkeleton() {
+  return (
+    <div className="h-9 animate-pulse rounded-md border bg-(--color-surface)" />
+  );
+}
+
+function ChartCardSkeleton({ title }: { title: string }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-(--color-text-muted)">{title}</CardTitle>
+        <CardDescription>Loading…</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="h-[280px] animate-pulse rounded bg-(--color-surface-2)" />
+      </CardContent>
+    </Card>
   );
 }
 

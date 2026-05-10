@@ -16,6 +16,17 @@ interface FilterArgs {
   campaignTypes: string[] | null;
 }
 
+/**
+ * Build a SQL fragment listing campaign types as `IN ($1, $2, …)`.
+ * Drizzle's `sql\`${array}\`` doesn't bind JS arrays as Postgres arrays
+ * (it serializes them as strings, breaking ANY(array)). We construct the
+ * IN list explicitly with one placeholder per element.
+ */
+function typesInClause(types: string[]): SQL {
+  const placeholders = sql.join(types.map((t) => sql`${t}`), sql`, `);
+  return sql`c.type IN (${placeholders})`;
+}
+
 function attributionWhere(args: FilterArgs): SQL {
   const conds: SQL[] = [
     sql`a.stage = 'sql'`,
@@ -25,7 +36,7 @@ function attributionWhere(args: FilterArgs): SQL {
   if (args.fromDate) conds.push(sql`a.transition_date >= ${args.fromDate}::date`);
   if (args.toDate)   conds.push(sql`a.transition_date <= ${args.toDate}::date`);
   if (args.campaignTypes && args.campaignTypes.length > 0) {
-    conds.push(sql`c.type = ANY(${args.campaignTypes})`);
+    conds.push(typesInClause(args.campaignTypes));
   }
   return sql.join(conds, sql` AND `);
 }
@@ -148,7 +159,7 @@ export async function getConversionRateTable(
   // Match the numerator to the same model/date/type filters as the bar chart.
   const numeratorWhere = attributionWhere(args);
   const typeWhere = args.campaignTypes && args.campaignTypes.length > 0
-    ? sql`AND c.type = ANY(${args.campaignTypes})`
+    ? sql`AND ${typesInClause(args.campaignTypes)}`
     : sql``;
 
   const rows = await db.execute<{
