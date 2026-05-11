@@ -50,7 +50,7 @@ export default async function DashboardLayout({
 
   return (
     <div className="flex min-h-svh">
-      <Sidebar />
+      <Sidebar isAdmin={profile.role === "admin"} />
       <div className="flex flex-1 flex-col">
         <header className="flex h-14 items-center justify-between border-b bg-(--color-surface) px-6">
           <div className="flex items-center gap-3">

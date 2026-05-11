@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, Coins, Route, Building2, Layers, BookOpen } from "lucide-react";
+import { BarChart3, Coins, Route, Building2, Layers, BookOpen, Settings2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface NavItem {
@@ -21,7 +21,7 @@ const NAV: NavItem[] = [
   { href: "/dashboard/depth", label: "Touchpoint Depth (G5)", icon: Layers, enabled: false, comingSoon: true },
 ];
 
-export function Sidebar() {
+export function Sidebar({ isAdmin = false }: { isAdmin?: boolean }) {
   const pathname = usePathname();
   return (
     <aside className="flex w-60 shrink-0 flex-col border-r bg-(--color-surface) px-3 py-4">
@@ -69,6 +69,26 @@ export function Sidebar() {
           );
         })}
       </nav>
+      {isAdmin ? (
+        <nav className="mt-4 flex flex-col gap-0.5 border-t pt-4">
+          <div className="mb-1 px-2 text-[10px] uppercase tracking-wide text-(--color-text-muted)">
+            Admin
+          </div>
+          <Link
+            href="/dashboard/admin/sync"
+            prefetch={false}
+            className={cn(
+              "flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm transition-colors",
+              pathname === "/dashboard/admin/sync"
+                ? "bg-(--color-surface-2) text-(--color-text) font-medium"
+                : "text-(--color-text-muted) hover:bg-(--color-surface-2) hover:text-(--color-text)",
+            )}
+          >
+            <Settings2 className="size-4" />
+            <span className="flex-1">Sync operations</span>
+          </Link>
+        </nav>
+      ) : null}
       <div className="mt-auto px-2 pt-4">
         <Link
           href="/methodology"

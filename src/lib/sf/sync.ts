@@ -50,16 +50,54 @@ export async function syncObject(def: SfObjectDef, deps: RunDeps): Promise<Objec
 
   // 2. Build SOQL. SOQL accepts ISO 8601 datetime literals unquoted, e.g.
   //    `WHERE LastModifiedDate > 2026-05-10T10:19:32Z`.
-  const fieldList = def.fields.join(", ");
-  const whereClause = watermark ? `WHERE LastModifiedDate > ${watermark}` : "";
-  const soql = `SELECT ${fieldList} FROM ${def.name} ${whereClause}`.trim();
-  log(`fetching ${def.name}`, { watermark, useBulk: def.useBulkApi, useQueryAll: def.useQueryAll });
+  // We use REST query with manual pagination for every object — handled
+  // 187K CampaignMembers in ~3 min on prod, well within Vercel's 300s ceiling.
+  //
+  // INVALID_FIELD self-healing (DATA-12 polish):
+  //   If SF rejects a field that doesn't exist in this org's schema, parse
+  //   the field name out of the error, drop it from the SELECT list, log
+  //   it to ops.sync_errors, and retry. Loops until either the query succeeds
+  //   or every field has been removed (defensive cap).
+  const buildSoql = (fields: string[]) => {
+    const fieldList = fields.join(", ");
+    const whereClause = watermark ? `WHERE LastModifiedDate > ${watermark}` : "";
+    return `SELECT ${fieldList} FROM ${def.name} ${whereClause}`.trim();
+  };
 
-  // 3. Execute. We use REST query with manual pagination for everything in
-  //    Phase 1 — it handled 187K CampaignMembers in ~3 min on the last run,
-  //    well within Vercel's 300s function ceiling. Bulk API 2.0 is a future
-  //    optimization once a single sync starts approaching the timeout.
-  const records = await fetchViaRest(conn, soql, def.useQueryAll);
+  let fields = [...def.fields];
+  const removedFields: string[] = [];
+  let records: Array<Record<string, unknown>> = [];
+
+  for (let attempt = 0; attempt < def.fields.length; attempt++) {
+    const soql = buildSoql(fields);
+    log(`fetching ${def.name}`, {
+      watermark,
+      attempt: attempt + 1,
+      fieldCount: fields.length,
+      removed: removedFields.length > 0 ? removedFields : undefined,
+    });
+    try {
+      records = await fetchViaRest(conn, soql, def.useQueryAll);
+      break;
+    } catch (err: unknown) {
+      const invalidField = extractInvalidField(err);
+      if (!invalidField || !fields.includes(invalidField)) {
+        // Either it's a different error, or we already removed this field.
+        // Re-throw — let the cron handler record it in sync_errors.
+        throw err;
+      }
+      removedFields.push(invalidField);
+      fields = fields.filter((f) => f !== invalidField);
+      log(`dropped invalid field ${invalidField} from ${def.name}`, {
+        attempt: attempt + 1,
+        fieldsRemaining: fields.length,
+      });
+      await sql`
+        INSERT INTO ops.sync_errors (run_id, object_name, error_code, message, raw_error)
+        VALUES (${runId}, ${def.name}, 'INVALID_FIELD_RECOVERED', ${`Dropped field ${invalidField} and retried`}, ${sql.json({ field: invalidField, attempt: attempt + 1 } as unknown as postgres.JSONValue)})
+      `;
+    }
+  }
 
   log(`fetched ${def.name}`, { rows: records.length });
 
@@ -166,5 +204,46 @@ async function fetchViaRest(
     records.push(...((result.records ?? []) as Array<Record<string, unknown>>));
   }
   return records;
+}
+
+/**
+ * Pull the offending field name out of an SF INVALID_FIELD error.
+ * SF errors take a few shapes; we try the common patterns:
+ *
+ *   "No such column 'XYZ' on entity 'Contact'"
+ *   "Field name 'XYZ' on entity 'Contact'"
+ *   "SELECT XYZ, Email FROM Contact ^ ERROR at Row:1:Column:8 No such column..."
+ *
+ * Returns null if we can't identify a specific field — caller should re-throw
+ * so the cron handler logs and continues with other objects.
+ */
+function extractInvalidField(err: unknown): string | null {
+  if (!err) return null;
+  const msg = err instanceof Error
+    ? err.message
+    : typeof err === "string"
+    ? err
+    : typeof (err as { errorCode?: unknown; message?: unknown })?.message === "string"
+    ? String((err as { message: string }).message)
+    : "";
+  if (!msg) return null;
+
+  // Ignore non-INVALID_FIELD errors so we don't silently strip fields on
+  // network or permission errors.
+  const code = (err as { errorCode?: string })?.errorCode ?? "";
+  if (code && code !== "INVALID_FIELD" && !msg.includes("INVALID_FIELD") && !msg.includes("No such column")) {
+    return null;
+  }
+
+  const patterns: RegExp[] = [
+    /No such column '([^']+)'/,
+    /Field name '([^']+)'/,
+    /(?:INVALID_FIELD|No such column)[^']*?:\s*([A-Za-z0-9_]+)/,
+  ];
+  for (const p of patterns) {
+    const m = msg.match(p);
+    if (m && m[1]) return m[1];
+  }
+  return null;
 }
 

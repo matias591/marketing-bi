@@ -20,7 +20,7 @@ export type FreshnessLevel = "green" | "yellow" | "red" | "unknown";
 
 export function freshnessLevel(
   syncedAt: Date | null,
-  thresholds: { green: number; yellow: number } = FRESHNESS_WEEKLY_HOURS,
+  thresholds: { green: number; yellow: number } = FRESHNESS_DAILY_HOURS,
 ): FreshnessLevel {
   if (!syncedAt) return "unknown";
   const ageHours = (Date.now() - syncedAt.getTime()) / (1000 * 60 * 60);
