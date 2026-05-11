@@ -1,6 +1,8 @@
 import { Suspense } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { FilterBar } from "@/components/dashboard/filter-bar";
+import { ExportCsvButton } from "@/components/dashboard/export-csv-button";
+import { MobileTopList } from "@/components/dashboard/mobile-top-list";
 import { AccountLeaderboardTable } from "./account-leaderboard";
 import { AccountsInfluenceChart } from "./accounts-influence-chart";
 import { getAccountLeaderboard, getCampaignsInfluencingAccounts } from "./query";
@@ -96,12 +98,15 @@ async function LeaderboardCard({ args }: { args: QueryArgs }) {
   const rows = await getAccountLeaderboard(args, 100);
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>Account leaderboard · top {rows.length}</CardTitle>
-        <CardDescription>
-          Sortable by any column. Last-touch ignores the date filter — it answers "when did this
-          account last engage at all?".
-        </CardDescription>
+      <CardHeader className="flex flex-row items-start justify-between gap-3">
+        <div>
+          <CardTitle>Account leaderboard · top {rows.length}</CardTitle>
+          <CardDescription>
+            Sortable by any column. Last-touch ignores the date filter — it answers "when did this
+            account last engage at all?".
+          </CardDescription>
+        </div>
+        <ExportCsvButton chart="accounts-leaderboard" />
       </CardHeader>
       <CardContent className="p-0">
         <AccountLeaderboardTable data={rows} />
@@ -114,15 +119,36 @@ async function InfluenceCard({ args }: { args: QueryArgs }) {
   const rows = await getCampaignsInfluencingAccounts(args, 20);
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>Campaigns influencing the most accounts</CardTitle>
-        <CardDescription>
-          Top campaigns by distinct Accounts whose contacts became SQL with the campaign in their
-          attribution window.
-        </CardDescription>
+      <CardHeader className="flex flex-row items-start justify-between gap-3">
+        <div>
+          <CardTitle>Campaigns influencing the most accounts</CardTitle>
+          <CardDescription>
+            Top campaigns by distinct Accounts whose contacts became SQL with the campaign in their
+            attribution window.
+          </CardDescription>
+        </div>
+        <ExportCsvButton chart="accounts-influence" />
       </CardHeader>
       <CardContent>
-        {rows.length === 0 ? <EmptyState /> : <AccountsInfluenceChart data={rows} />}
+        {rows.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <>
+            <div className="hidden md:block">
+              <AccountsInfluenceChart data={rows} />
+            </div>
+            <div className="md:hidden">
+              <MobileTopList
+                title="Campaigns by distinct accounts"
+                items={rows.slice(0, 10).map((r) => ({
+                  label: r.campaignName ?? r.campaignId,
+                  sublabel: r.campaignType ?? undefined,
+                  value: String(r.influencedAccounts),
+                }))}
+              />
+            </div>
+          </>
+        )}
       </CardContent>
     </Card>
   );

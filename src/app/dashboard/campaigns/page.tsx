@@ -2,6 +2,8 @@ import { Suspense } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { FilterBar } from "@/components/dashboard/filter-bar";
 import { ExcludedReasons } from "@/components/dashboard/excluded-reasons";
+import { ExportCsvButton } from "@/components/dashboard/export-csv-button";
+import { MobileTopList } from "@/components/dashboard/mobile-top-list";
 import { CampaignBarChart } from "./campaign-bar-chart";
 import { CampaignTypeChart } from "./campaign-type-chart";
 import { ConversionRateTable } from "./conversion-rate-table";
@@ -145,15 +147,36 @@ async function TopCampaignsCard({ args, compare }: { args: QueryArgs; compare: b
   ]);
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>Top {rows.length} campaigns</CardTitle>
-        <CardDescription>
-          Source: <code>mart.attribution_contact</code> · model <strong>{args.model.replace("_", "-")}</strong>
-        </CardDescription>
+      <CardHeader className="flex flex-row items-start justify-between gap-3">
+        <div>
+          <CardTitle>Top {rows.length} campaigns</CardTitle>
+          <CardDescription>
+            Source: <code>mart.attribution_contact</code> · model <strong>{args.model.replace("_", "-")}</strong>
+          </CardDescription>
+        </div>
+        <ExportCsvButton chart="campaigns-top" />
       </CardHeader>
       <CardContent className="p-0">
         <div className="px-6 py-2">
-          {rows.length === 0 ? <EmptyState /> : <CampaignBarChart data={rows} />}
+          {rows.length === 0 ? (
+            <EmptyState />
+          ) : (
+            <>
+              <div className="hidden md:block">
+                <CampaignBarChart data={rows} />
+              </div>
+              <div className="md:hidden">
+                <MobileTopList
+                  title="Top campaigns by credit"
+                  items={rows.slice(0, 10).map((r) => ({
+                    label: r.campaignName ?? r.campaignId,
+                    sublabel: r.campaignType ?? undefined,
+                    value: r.totalCredit.toFixed(2),
+                  }))}
+                />
+              </div>
+            </>
+          )}
         </div>
         <ExcludedReasons total={exclusion.total} included={exclusion.included} reasons={exclusion.reasons} />
       </CardContent>
@@ -186,12 +209,33 @@ async function TypeRollupCard({ args, compare }: { args: QueryArgs; compare: boo
   const rows = await getCampaignTypeRollup(args);
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>Credit by campaign type</CardTitle>
-        <CardDescription>Same model and date range, rolled up by campaign type.</CardDescription>
+      <CardHeader className="flex flex-row items-start justify-between gap-3">
+        <div>
+          <CardTitle>Credit by campaign type</CardTitle>
+          <CardDescription>Same model and date range, rolled up by campaign type.</CardDescription>
+        </div>
+        <ExportCsvButton chart="campaigns-type" />
       </CardHeader>
       <CardContent>
-        {rows.length === 0 ? <EmptyState /> : <CampaignTypeChart data={rows} />}
+        {rows.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <>
+            <div className="hidden md:block">
+              <CampaignTypeChart data={rows} />
+            </div>
+            <div className="md:hidden">
+              <MobileTopList
+                title="By campaign type"
+                items={rows.map((r) => ({
+                  label: r.campaignType,
+                  sublabel: `${r.campaignCount} campaign${r.campaignCount === 1 ? "" : "s"}`,
+                  value: r.totalCredit.toFixed(2),
+                }))}
+              />
+            </div>
+          </>
+        )}
       </CardContent>
     </Card>
   );
@@ -201,12 +245,15 @@ async function ConversionRateCard({ args }: { args: QueryArgs }) {
   const rows = await getConversionRateTable(args, 50);
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>Engagement → SQL conversion rate</CardTitle>
-        <CardDescription>
-          Distinct contacts touched by the campaign vs. those who later became SQL within the
-          current filter window. Click column headers to re-sort.
-        </CardDescription>
+      <CardHeader className="flex flex-row items-start justify-between gap-3">
+        <div>
+          <CardTitle>Engagement → SQL conversion rate</CardTitle>
+          <CardDescription>
+            Distinct contacts touched by the campaign vs. those who later became SQL within the
+            current filter window. Click column headers to re-sort.
+          </CardDescription>
+        </div>
+        <ExportCsvButton chart="campaigns-conversion" />
       </CardHeader>
       <CardContent className="p-0">
         <ConversionRateTable data={rows} />

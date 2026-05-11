@@ -2,6 +2,8 @@ import { Suspense } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { FilterBar } from "@/components/dashboard/filter-bar";
 import { ExcludedReasons } from "@/components/dashboard/excluded-reasons";
+import { ExportCsvButton } from "@/components/dashboard/export-csv-button";
+import { MobileTopList } from "@/components/dashboard/mobile-top-list";
 import { ComparisonChart } from "../campaigns/comparison-chart";
 import { RevenueBarChart } from "./revenue-bar-chart";
 import { RevenueTypeChart } from "./revenue-type-chart";
@@ -160,15 +162,36 @@ async function RevenueByCampaignCard({ args, compare }: { args: QueryArgs; compa
   ]);
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>Top {rows.length} campaigns by revenue</CardTitle>
-        <CardDescription>
-          Source: <code>mart.opportunity_credit</code> · model <strong>{args.model.replace("_", "-")}</strong>
-        </CardDescription>
+      <CardHeader className="flex flex-row items-start justify-between gap-3">
+        <div>
+          <CardTitle>Top {rows.length} campaigns by revenue</CardTitle>
+          <CardDescription>
+            Source: <code>mart.opportunity_credit</code> · model <strong>{args.model.replace("_", "-")}</strong>
+          </CardDescription>
+        </div>
+        <ExportCsvButton chart="revenue-campaigns" />
       </CardHeader>
       <CardContent className="p-0">
         <div className="px-6 py-2">
-          {rows.length === 0 ? <EmptyState /> : <RevenueBarChart data={rows} />}
+          {rows.length === 0 ? (
+            <EmptyState />
+          ) : (
+            <>
+              <div className="hidden md:block">
+                <RevenueBarChart data={rows} />
+              </div>
+              <div className="md:hidden">
+                <MobileTopList
+                  title="Top campaigns by attributed revenue"
+                  items={rows.slice(0, 10).map((r) => ({
+                    label: r.campaignName ?? r.campaignId,
+                    sublabel: r.campaignType ?? undefined,
+                    value: fmtUsd.format(r.revenue),
+                  }))}
+                />
+              </div>
+            </>
+          )}
         </div>
         <ExcludedReasons total={exclusion.total} included={exclusion.included} reasons={exclusion.reasons} />
       </CardContent>
@@ -201,15 +224,36 @@ async function RevenueByTypeCard({ args, compare }: { args: QueryArgs; compare: 
   const rows = await getRevenueByCampaignType(args);
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>Revenue by campaign type</CardTitle>
-        <CardDescription>
-          Same model and date range, rolled up by campaign type. Bars labeled with $ value and %
-          of total.
-        </CardDescription>
+      <CardHeader className="flex flex-row items-start justify-between gap-3">
+        <div>
+          <CardTitle>Revenue by campaign type</CardTitle>
+          <CardDescription>
+            Same model and date range, rolled up by campaign type. Bars labeled with $ value and %
+            of total.
+          </CardDescription>
+        </div>
+        <ExportCsvButton chart="revenue-types" />
       </CardHeader>
       <CardContent>
-        {rows.length === 0 ? <EmptyState /> : <RevenueTypeChart data={rows} />}
+        {rows.length === 0 ? (
+          <EmptyState />
+        ) : (
+          <>
+            <div className="hidden md:block">
+              <RevenueTypeChart data={rows} />
+            </div>
+            <div className="md:hidden">
+              <MobileTopList
+                title="Revenue by type"
+                items={rows.map((r) => ({
+                  label: r.campaignType,
+                  sublabel: `${(r.pctOfTotal * 100).toFixed(1)}% of total · ${r.campaignCount} campaign${r.campaignCount === 1 ? "" : "s"}`,
+                  value: fmtUsd.format(r.revenue),
+                }))}
+              />
+            </div>
+          </>
+        )}
       </CardContent>
     </Card>
   );
