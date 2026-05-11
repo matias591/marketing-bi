@@ -52,13 +52,13 @@ export default async function DashboardLayout({
     <div className="flex min-h-svh">
       <Sidebar isAdmin={profile.role === "admin"} />
       <div className="flex flex-1 flex-col">
-        <header className="flex h-14 items-center justify-between border-b bg-(--color-surface) px-6">
+        <header className="sticky top-0 z-30 flex h-11 items-center justify-between border-b border-(--color-border) bg-(--color-surface)/90 px-4 backdrop-blur supports-[backdrop-filter]:bg-(--color-surface)/70">
           <div className="flex items-center gap-3">
             <FreshnessPill syncedAt={latestSyncAt} />
           </div>
           <UserMenu email={profile.email} role={profile.role} />
         </header>
-        <main className="flex-1 overflow-auto bg-(--color-bg) p-6">{children}</main>
+        <main className="flex-1 overflow-auto bg-(--color-bg) px-4 py-4">{children}</main>
       </div>
     </div>
   );

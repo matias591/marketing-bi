@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
 import {
   type ColumnDef,
   flexRender,
@@ -12,6 +11,7 @@ import {
 } from "@tanstack/react-table";
 import { ArrowDown, ArrowUp, ArrowUpDown, ChevronRight } from "lucide-react";
 import type { AccountLeaderboardRow } from "./query";
+import { AccountDrilldownSheet } from "./account-drilldown-sheet";
 import { cn } from "@/lib/utils";
 
 const usd = new Intl.NumberFormat(undefined, {
@@ -29,16 +29,21 @@ const columns: ColumnDef<AccountLeaderboardRow>[] = [
   {
     accessorKey: "accountName",
     header: "Account",
-    cell: ({ row }) => (
-      <Link
-        href={`/dashboard/journey?accountId=${row.original.accountId}`}
-        className="inline-flex items-center gap-1 font-medium hover:underline"
-        title={`See contacts in ${row.original.accountName ?? row.original.accountId}`}
-      >
-        {row.original.accountName ?? row.original.accountId}
-        <ChevronRight className="size-3 text-(--color-text-muted)" />
-      </Link>
-    ),
+    cell: ({ row }) => {
+      const label = row.original.accountName ?? row.original.accountId;
+      return (
+        <AccountDrilldownSheet accountId={row.original.accountId} accountName={label}>
+          <button
+            type="button"
+            className="inline-flex items-center gap-1 text-left font-medium hover:underline"
+            title={`See contacts in ${label}`}
+          >
+            <span className="truncate">{label}</span>
+            <ChevronRight className="size-3 text-(--color-text-muted)" />
+          </button>
+        </AccountDrilldownSheet>
+      );
+    },
   },
   {
     accessorKey: "engagedContacts",
@@ -98,7 +103,7 @@ export function AccountLeaderboardTable({ data }: { data: AccountLeaderboardRow[
                     key={header.id}
                     onClick={header.column.getToggleSortingHandler()}
                     className={cn(
-                      "px-3 py-2 text-left font-medium",
+                      "px-3 py-1.5 text-left font-medium",
                       header.column.getCanSort() && "cursor-pointer select-none",
                     )}
                   >
@@ -135,7 +140,7 @@ export function AccountLeaderboardTable({ data }: { data: AccountLeaderboardRow[
                 )}
               >
                 {row.getVisibleCells().map((cell) => (
-                  <td key={cell.id} className="px-3 py-2">
+                  <td key={cell.id} className="px-3 py-1.5">
                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
                   </td>
                 ))}

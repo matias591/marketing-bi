@@ -87,7 +87,7 @@ export function ConversionRateTable({ data }: { data: ConversionRateRow[] }) {
                     key={header.id}
                     onClick={header.column.getToggleSortingHandler()}
                     className={cn(
-                      "px-3 py-2 text-left font-medium",
+                      "px-3 py-1.5 text-left font-medium",
                       header.column.getCanSort() && "cursor-pointer select-none",
                     )}
                   >
@@ -124,7 +124,7 @@ export function ConversionRateTable({ data }: { data: ConversionRateRow[] }) {
                 )}
               >
                 {row.getVisibleCells().map((cell) => (
-                  <td key={cell.id} className="px-3 py-2">
+                  <td key={cell.id} className="px-3 py-1.5">
                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
                   </td>
                 ))}

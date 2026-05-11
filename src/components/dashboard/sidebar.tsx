@@ -24,10 +24,10 @@ const NAV: NavItem[] = [
 export function Sidebar({ isAdmin = false }: { isAdmin?: boolean }) {
   const pathname = usePathname();
   return (
-    <aside className="flex w-60 shrink-0 flex-col border-r bg-(--color-surface) px-3 py-4">
-      <div className="mb-6 px-2">
-        <div className="text-sm font-semibold tracking-tight">Marketing BI</div>
-        <div className="text-xs text-(--color-text-muted)">Salesforce attribution</div>
+    <aside className="flex w-56 shrink-0 flex-col border-r border-(--color-border) bg-(--color-surface) px-2.5 py-3">
+      <div className="mb-4 px-2">
+        <div className="text-[13px] font-semibold tracking-tight">Marketing BI</div>
+        <div className="text-[10px] uppercase tracking-wide text-(--color-text-soft)">Salesforce attribution</div>
       </div>
       <nav className="flex flex-col gap-0.5">
         {NAV.map((item) => {
