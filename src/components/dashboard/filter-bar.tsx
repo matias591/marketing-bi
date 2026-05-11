@@ -10,6 +10,7 @@ interface FilterBarProps {
   preset: DatePreset;
   types: string[] | null;
   availableTypes: string[];
+  compare: boolean;
   freshnessLabel?: string;
 }
 
@@ -32,7 +33,7 @@ const MODEL_LABELS: Record<AttributionModel, string> = {
   last_touch: "Last touch",
 };
 
-export function FilterBar({ model, preset, types, availableTypes }: FilterBarProps) {
+export function FilterBar({ model, preset, types, availableTypes, compare }: FilterBarProps) {
   const router = useRouter();
   const pathname = usePathname();
   const sp = useSearchParams();
@@ -67,10 +68,28 @@ export function FilterBar({ model, preset, types, availableTypes }: FilterBarPro
 
       <FilterGroup label="Model">
         {ATTRIBUTION_MODELS.map((m) => (
-          <PillButton key={m} active={model === m} onClick={() => setParam("model", m)}>
+          <PillButton
+            key={m}
+            active={!compare && model === m}
+            onClick={() => {
+              // Selecting a single model exits compare mode.
+              const next = new URLSearchParams(sp.toString());
+              next.set("model", m);
+              next.delete("compare");
+              startTransition(() => {
+                router.replace(`${pathname}?${next.toString()}`, { scroll: false });
+              });
+            }}
+          >
             {MODEL_LABELS[m]}
           </PillButton>
         ))}
+        <PillButton
+          active={compare}
+          onClick={() => setParam("compare", compare ? null : "1")}
+        >
+          Compare all
+        </PillButton>
       </FilterGroup>
 
       {availableTypes.length > 0 ? (

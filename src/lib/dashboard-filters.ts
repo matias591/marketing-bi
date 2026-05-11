@@ -37,6 +37,9 @@ export const FilterSchema = z.object({
   // Comma-separated campaign types (e.g. "Webinar registration,Webinar invites")
   // Empty / missing = all types
   types: z.string().optional(),
+  // Compare mode: when "1", charts show all three attribution models
+  // simultaneously as grouped bars (DASH-12).
+  compare: z.enum(["1"]).optional(),
 });
 
 export type DashboardFilters = z.infer<typeof FilterSchema>;
@@ -122,6 +125,7 @@ export function parseFilters(input: Record<string, string | string[] | undefined
     from: flat.from,
     to: flat.to,
     types: flat.types,
+    compare: flat.compare,
   });
 }
 

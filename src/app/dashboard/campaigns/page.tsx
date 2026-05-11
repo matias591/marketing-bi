@@ -1,13 +1,18 @@
 import { Suspense } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { FilterBar } from "@/components/dashboard/filter-bar";
+import { ExcludedReasons } from "@/components/dashboard/excluded-reasons";
 import { CampaignBarChart } from "./campaign-bar-chart";
 import { CampaignTypeChart } from "./campaign-type-chart";
 import { ConversionRateTable } from "./conversion-rate-table";
+import { ComparisonChart } from "./comparison-chart";
 import {
   getAvailableCampaignTypes,
   getCampaignContributionToSqls,
+  getCampaignContributionComparison,
   getCampaignTypeRollup,
+  getCampaignTypeRollupComparison,
+  getCampaignsExclusionCounts,
   getConversionRateTable,
 } from "./query";
 import { parseFilters, parseTypeFilter, resolveDateRange, type DashboardFilters } from "@/lib/dashboard-filters";
@@ -33,6 +38,7 @@ export default async function CampaignsPage({
   const filters = parseFilters(raw);
   const dateRange = resolveDateRange(filters);
   const types = parseTypeFilter(filters.types);
+  const compare = filters.compare === "1";
 
   const queryArgs: QueryArgs = {
     model: filters.model,
@@ -40,19 +46,18 @@ export default async function CampaignsPage({
     toDate: dateRange.to,
     campaignTypes: types,
   };
-
-  // Re-keying every section by the active filter set forces fresh Suspense
-  // boundaries on every navigation; without this, React would try to reuse
-  // the previous render and queries can stall on the prior result.
-  const filterKey = JSON.stringify(queryArgs);
+  const filterKey = JSON.stringify({ ...queryArgs, compare });
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-5">
       <header>
         <h1 className="text-xl font-semibold tracking-tight">Campaign Contribution to SQLs</h1>
         <p className="mt-1 text-sm text-(--color-text-muted)">
-          {modelDescription(filters.model)} per campaign at the SQL stage. Range: <strong>{dateRange.label}</strong>.
-          See <a className="underline" href="/methodology">methodology</a> for full details.
+          {compare
+            ? "Comparing all three attribution models side-by-side. Blue = linear, amber = first-touch, red = last-touch."
+            : modelDescription(filters.model)}{" "}
+          Range: <strong>{dateRange.label}</strong>. See{" "}
+          <a className="underline" href="/methodology">methodology</a> for full details.
         </p>
       </header>
 
@@ -61,15 +66,16 @@ export default async function CampaignsPage({
           model={filters.model}
           preset={filters.preset}
           types={types}
+          compare={compare}
         />
       </Suspense>
 
       <Suspense key={`top-${filterKey}`} fallback={<ChartCardSkeleton title="Top campaigns" />}>
-        <TopCampaignsCard args={queryArgs} />
+        <TopCampaignsCard args={queryArgs} compare={compare} />
       </Suspense>
 
       <Suspense key={`type-${filterKey}`} fallback={<ChartCardSkeleton title="Credit by campaign type" />}>
-        <TypeRollupCard args={queryArgs} />
+        <TypeRollupCard args={queryArgs} compare={compare} />
       </Suspense>
 
       <Suspense key={`conv-${filterKey}`} fallback={<ChartCardSkeleton title="Engagement → SQL conversion rate" />}>
@@ -79,44 +85,104 @@ export default async function CampaignsPage({
   );
 }
 
-// Each section is its own async server component → Suspense streams them
-// independently. The page returns to the browser before any of these resolve;
-// each card renders as its query completes.
-
 async function FilterBarSection({
   model,
   preset,
   types,
+  compare,
 }: {
   model: DashboardFilters["model"];
   preset: DashboardFilters["preset"];
   types: string[] | null;
+  compare: boolean;
 }) {
   const availableTypes = await getAvailableCampaignTypes();
   return (
-    <FilterBar model={model} preset={preset} types={types} availableTypes={availableTypes} />
+    <FilterBar
+      model={model}
+      preset={preset}
+      types={types}
+      availableTypes={availableTypes}
+      compare={compare}
+    />
   );
 }
 
-async function TopCampaignsCard({ args }: { args: QueryArgs }) {
-  const rows = await getCampaignContributionToSqls(args, 20);
+async function TopCampaignsCard({ args, compare }: { args: QueryArgs; compare: boolean }) {
+  if (compare) {
+    const [rows, exclusion] = await Promise.all([
+      getCampaignContributionComparison(args, 20),
+      getCampaignsExclusionCounts(args),
+    ]);
+    const chartRows = rows.map((r) => ({
+      label: r.campaignName ?? r.campaignId,
+      sublabel: r.campaignType ?? undefined,
+      linear: r.creditByModel.linear,
+      first_touch: r.creditByModel.first_touch,
+      last_touch: r.creditByModel.last_touch,
+    }));
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Top {rows.length} campaigns · all models</CardTitle>
+          <CardDescription>
+            Each campaign shows credit under linear, first-touch, and last-touch simultaneously.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="px-6 py-2">
+            {rows.length === 0 ? <EmptyState /> : <ComparisonChart data={chartRows} />}
+          </div>
+          <ExcludedReasons total={exclusion.total} included={exclusion.included} reasons={exclusion.reasons} />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const [rows, exclusion] = await Promise.all([
+    getCampaignContributionToSqls(args, 20),
+    getCampaignsExclusionCounts(args),
+  ]);
   return (
     <Card>
       <CardHeader>
         <CardTitle>Top {rows.length} campaigns</CardTitle>
         <CardDescription>
-          Source: <code>mart.attribution_contact</code> · model{" "}
-          <strong>{args.model.replace("_", "-")}</strong>
+          Source: <code>mart.attribution_contact</code> · model <strong>{args.model.replace("_", "-")}</strong>
         </CardDescription>
       </CardHeader>
-      <CardContent>
-        {rows.length === 0 ? <EmptyState /> : <CampaignBarChart data={rows} />}
+      <CardContent className="p-0">
+        <div className="px-6 py-2">
+          {rows.length === 0 ? <EmptyState /> : <CampaignBarChart data={rows} />}
+        </div>
+        <ExcludedReasons total={exclusion.total} included={exclusion.included} reasons={exclusion.reasons} />
       </CardContent>
     </Card>
   );
 }
 
-async function TypeRollupCard({ args }: { args: QueryArgs }) {
+async function TypeRollupCard({ args, compare }: { args: QueryArgs; compare: boolean }) {
+  if (compare) {
+    const rows = await getCampaignTypeRollupComparison(args);
+    const chartRows = rows.map((r) => ({
+      label: r.campaignType,
+      linear: r.creditByModel.linear,
+      first_touch: r.creditByModel.first_touch,
+      last_touch: r.creditByModel.last_touch,
+    }));
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Credit by campaign type · all models</CardTitle>
+          <CardDescription>Same data, three models side by side.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {rows.length === 0 ? <EmptyState /> : <ComparisonChart data={chartRows} />}
+        </CardContent>
+      </Card>
+    );
+  }
+
   const rows = await getCampaignTypeRollup(args);
   return (
     <Card>
@@ -150,9 +216,7 @@ async function ConversionRateCard({ args }: { args: QueryArgs }) {
 }
 
 function FilterBarSkeleton() {
-  return (
-    <div className="h-9 animate-pulse rounded-md border bg-(--color-surface)" />
-  );
+  return <div className="h-9 animate-pulse rounded-md border bg-(--color-surface)" />;
 }
 
 function ChartCardSkeleton({ title }: { title: string }) {
@@ -172,12 +236,12 @@ function ChartCardSkeleton({ title }: { title: string }) {
 function modelDescription(model: string): string {
   switch (model) {
     case "first_touch":
-      return "First-touch credit (1.0 to the earliest in-window touchpoint)";
+      return "First-touch credit (1.0 to the earliest in-window touchpoint).";
     case "last_touch":
-      return "Last-touch credit (1.0 to the latest in-window touchpoint)";
+      return "Last-touch credit (1.0 to the latest in-window touchpoint).";
     case "linear":
     default:
-      return "Linear-multi-touch credit (1/N split across in-window touchpoints)";
+      return "Linear-multi-touch credit (1/N split across in-window touchpoints).";
   }
 }
 

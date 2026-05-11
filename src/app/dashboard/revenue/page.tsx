@@ -1,11 +1,16 @@
 import { Suspense } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { FilterBar } from "@/components/dashboard/filter-bar";
+import { ExcludedReasons } from "@/components/dashboard/excluded-reasons";
+import { ComparisonChart } from "../campaigns/comparison-chart";
 import { RevenueBarChart } from "./revenue-bar-chart";
 import { RevenueTypeChart } from "./revenue-type-chart";
 import {
   getRevenueByCampaign,
+  getRevenueByCampaignComparison,
   getRevenueByCampaignType,
+  getRevenueByCampaignTypeComparison,
+  getRevenueExclusionCounts,
   getRevenueHeadline,
 } from "./query";
 import { getAvailableCampaignTypes } from "../campaigns/query";
@@ -40,6 +45,7 @@ export default async function RevenuePage({
   const filters = parseFilters({ preset: "ytd", ...raw });
   const dateRange = resolveDateRange(filters);
   const types = parseTypeFilter(filters.types);
+  const compare = filters.compare === "1";
 
   const queryArgs: QueryArgs = {
     model: filters.model,
@@ -47,22 +53,23 @@ export default async function RevenuePage({
     toDate: dateRange.to,
     campaignTypes: types,
   };
-  const filterKey = JSON.stringify(queryArgs);
+  const filterKey = JSON.stringify({ ...queryArgs, compare });
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-5">
       <header>
         <h1 className="text-xl font-semibold tracking-tight">Revenue & Closed Won</h1>
         <p className="mt-1 text-sm text-(--color-text-muted)">
-          Closed Won revenue attributed to each campaign under the{" "}
-          <strong>{filters.model.replace("_", "-")}</strong> model. OCR Contacts on each Opp share
-          the deal amount equally; each Contact's share is then distributed across their
+          {compare
+            ? "Closed Won revenue attributed under all three models side-by-side."
+            : <>Closed Won revenue attributed under the <strong>{filters.model.replace("_", "-")}</strong> model.</>}{" "}
+          OCR contacts share the deal amount equally; each contact's share is distributed across their
           customer-stage touchpoints. Range: <strong>{dateRange.label}</strong> (close date).
         </p>
       </header>
 
       <Suspense fallback={<FilterBarSkeleton />}>
-        <FilterBarSection model={filters.model} preset={filters.preset} types={types} />
+        <FilterBarSection model={filters.model} preset={filters.preset} types={types} compare={compare} />
       </Suspense>
 
       <Suspense key={`headline-${filterKey}`} fallback={<HeadlineSkeleton />}>
@@ -70,11 +77,11 @@ export default async function RevenuePage({
       </Suspense>
 
       <Suspense key={`bycamp-${filterKey}`} fallback={<ChartCardSkeleton title="Top campaigns by revenue" />}>
-        <RevenueByCampaignCard args={queryArgs} />
+        <RevenueByCampaignCard args={queryArgs} compare={compare} />
       </Suspense>
 
       <Suspense key={`bytype-${filterKey}`} fallback={<ChartCardSkeleton title="Revenue by campaign type" />}>
-        <RevenueByTypeCard args={queryArgs} />
+        <RevenueByTypeCard args={queryArgs} compare={compare} />
       </Suspense>
     </div>
   );
@@ -84,14 +91,16 @@ async function FilterBarSection({
   model,
   preset,
   types,
+  compare,
 }: {
   model: DashboardFilters["model"];
   preset: DashboardFilters["preset"];
   types: string[] | null;
+  compare: boolean;
 }) {
   const availableTypes = await getAvailableCampaignTypes();
   return (
-    <FilterBar model={model} preset={preset} types={types} availableTypes={availableTypes} />
+    <FilterBar model={model} preset={preset} types={types} availableTypes={availableTypes} compare={compare} />
   );
 }
 
@@ -116,25 +125,79 @@ function Kpi({ label, value }: { label: string; value: string }) {
   );
 }
 
-async function RevenueByCampaignCard({ args }: { args: QueryArgs }) {
-  const rows = await getRevenueByCampaign(args, 20);
+async function RevenueByCampaignCard({ args, compare }: { args: QueryArgs; compare: boolean }) {
+  if (compare) {
+    const [rows, exclusion] = await Promise.all([
+      getRevenueByCampaignComparison(args, 20),
+      getRevenueExclusionCounts(args),
+    ]);
+    const chartRows = rows.map((r) => ({
+      label: r.campaignName ?? r.campaignId,
+      sublabel: r.campaignType ?? undefined,
+      linear: r.revenueByModel.linear,
+      first_touch: r.revenueByModel.first_touch,
+      last_touch: r.revenueByModel.last_touch,
+    }));
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Top {rows.length} campaigns by revenue · all models</CardTitle>
+          <CardDescription>Revenue under linear, first-touch, and last-touch side by side.</CardDescription>
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="px-6 py-2">
+            {rows.length === 0 ? <EmptyState /> : <ComparisonChart data={chartRows} valueFormat="currency" />}
+          </div>
+          <ExcludedReasons total={exclusion.total} included={exclusion.included} reasons={exclusion.reasons} />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const [rows, exclusion] = await Promise.all([
+    getRevenueByCampaign(args, 20),
+    getRevenueExclusionCounts(args),
+  ]);
   return (
     <Card>
       <CardHeader>
         <CardTitle>Top {rows.length} campaigns by revenue</CardTitle>
         <CardDescription>
-          Source: <code>mart.opportunity_credit</code> · model{" "}
-          <strong>{args.model.replace("_", "-")}</strong>
+          Source: <code>mart.opportunity_credit</code> · model <strong>{args.model.replace("_", "-")}</strong>
         </CardDescription>
       </CardHeader>
-      <CardContent>
-        {rows.length === 0 ? <EmptyState /> : <RevenueBarChart data={rows} />}
+      <CardContent className="p-0">
+        <div className="px-6 py-2">
+          {rows.length === 0 ? <EmptyState /> : <RevenueBarChart data={rows} />}
+        </div>
+        <ExcludedReasons total={exclusion.total} included={exclusion.included} reasons={exclusion.reasons} />
       </CardContent>
     </Card>
   );
 }
 
-async function RevenueByTypeCard({ args }: { args: QueryArgs }) {
+async function RevenueByTypeCard({ args, compare }: { args: QueryArgs; compare: boolean }) {
+  if (compare) {
+    const rows = await getRevenueByCampaignTypeComparison(args);
+    const chartRows = rows.map((r) => ({
+      label: r.campaignType,
+      linear: r.revenueByModel.linear,
+      first_touch: r.revenueByModel.first_touch,
+      last_touch: r.revenueByModel.last_touch,
+    }));
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Revenue by campaign type · all models</CardTitle>
+          <CardDescription>Same data, three models side by side.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {rows.length === 0 ? <EmptyState /> : <ComparisonChart data={chartRows} valueFormat="currency" />}
+        </CardContent>
+      </Card>
+    );
+  }
+
   const rows = await getRevenueByCampaignType(args);
   return (
     <Card>

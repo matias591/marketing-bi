@@ -27,12 +27,18 @@ function typesInClause(types: string[]): SQL {
   return sql`c.type IN (${placeholders})`;
 }
 
-function attributionWhere(args: FilterArgs): SQL {
+/**
+ * Build the WHERE clause shared by all attribution-driven queries.
+ * When `modelMode` is "single", filters by `args.model`; when "all", omits
+ * the model filter so the query returns rows for all three models at once
+ * (DASH-12 compare mode).
+ */
+function attributionWhere(args: FilterArgs, modelMode: "single" | "all" = "single"): SQL {
   const conds: SQL[] = [
     sql`a.stage = 'sql'`,
-    sql`a.model = ${args.model}`,
     sql`NOT c.is_deleted`,
   ];
+  if (modelMode === "single") conds.push(sql`a.model = ${args.model}`);
   if (args.fromDate) conds.push(sql`a.transition_date >= ${args.fromDate}::date`);
   if (args.toDate)   conds.push(sql`a.transition_date <= ${args.toDate}::date`);
   if (args.campaignTypes && args.campaignTypes.length > 0) {
@@ -88,6 +94,55 @@ export async function getCampaignContributionToSqls(
   }));
 }
 
+// Multi-model compare view (DASH-12): one row per campaign with credit
+// under all three models. Single-query pivot via FILTER aggregates.
+export interface CampaignComparisonRow {
+  campaignId: string;
+  campaignName: string | null;
+  campaignType: string | null;
+  creditByModel: { linear: number; first_touch: number; last_touch: number };
+}
+
+export async function getCampaignContributionComparison(
+  args: FilterArgs,
+  topN = 20,
+): Promise<CampaignComparisonRow[]> {
+  const where = attributionWhere(args, "all");
+  const rows = await db.execute<{
+    campaign_id: string;
+    campaign_name: string | null;
+    campaign_type: string | null;
+    linear_credit: string | number | null;
+    first_credit: string | number | null;
+    last_credit: string | number | null;
+  }>(sql`
+    SELECT
+      c.id   AS campaign_id,
+      c.name AS campaign_name,
+      c.type AS campaign_type,
+      COALESCE(SUM(a.credit) FILTER (WHERE a.model = 'linear'), 0)::numeric      AS linear_credit,
+      COALESCE(SUM(a.credit) FILTER (WHERE a.model = 'first_touch'), 0)::numeric AS first_credit,
+      COALESCE(SUM(a.credit) FILTER (WHERE a.model = 'last_touch'), 0)::numeric  AS last_credit
+    FROM raw.sf_campaign c
+    JOIN mart.attribution_contact a ON a.campaign_id = c.id
+    WHERE ${where}
+    GROUP BY c.id, c.name, c.type
+    HAVING SUM(a.credit) FILTER (WHERE a.model = 'linear') > 0
+    ORDER BY linear_credit DESC, c.name ASC
+    LIMIT ${topN}
+  `);
+  return (rows as Array<typeof rows[number]>).map((r) => ({
+    campaignId: r.campaign_id,
+    campaignName: r.campaign_name,
+    campaignType: r.campaign_type,
+    creditByModel: {
+      linear: Number(r.linear_credit ?? 0),
+      first_touch: Number(r.first_credit ?? 0),
+      last_touch: Number(r.last_credit ?? 0),
+    },
+  }));
+}
+
 // ---------------------------------------------------------------------------
 // 2. Campaign-Type Rollup (DASH-02 — same filters, grouped by type)
 // ---------------------------------------------------------------------------
@@ -124,6 +179,42 @@ export async function getCampaignTypeRollup(args: FilterArgs): Promise<CampaignT
     totalCredit: Number(r.total_credit),
     sqlContacts: Number(r.sql_contacts),
     campaignCount: Number(r.campaign_count),
+  }));
+}
+
+// Multi-model rollup by campaign type (DASH-12 for type chart)
+export interface CampaignTypeComparisonRow {
+  campaignType: string;
+  creditByModel: { linear: number; first_touch: number; last_touch: number };
+}
+
+export async function getCampaignTypeRollupComparison(args: FilterArgs): Promise<CampaignTypeComparisonRow[]> {
+  const where = attributionWhere(args, "all");
+  const rows = await db.execute<{
+    campaign_type: string | null;
+    linear_credit: string | number | null;
+    first_credit: string | number | null;
+    last_credit: string | number | null;
+  }>(sql`
+    SELECT
+      COALESCE(c.type, '(no type)')                                              AS campaign_type,
+      COALESCE(SUM(a.credit) FILTER (WHERE a.model = 'linear'), 0)::numeric      AS linear_credit,
+      COALESCE(SUM(a.credit) FILTER (WHERE a.model = 'first_touch'), 0)::numeric AS first_credit,
+      COALESCE(SUM(a.credit) FILTER (WHERE a.model = 'last_touch'), 0)::numeric  AS last_credit
+    FROM raw.sf_campaign c
+    JOIN mart.attribution_contact a ON a.campaign_id = c.id
+    WHERE ${where}
+    GROUP BY COALESCE(c.type, '(no type)')
+    HAVING SUM(a.credit) FILTER (WHERE a.model = 'linear') > 0
+    ORDER BY linear_credit DESC
+  `);
+  return (rows as Array<typeof rows[number]>).map((r) => ({
+    campaignType: r.campaign_type ?? "(no type)",
+    creditByModel: {
+      linear: Number(r.linear_credit ?? 0),
+      first_touch: Number(r.first_credit ?? 0),
+      last_touch: Number(r.last_credit ?? 0),
+    },
   }));
 }
 
@@ -215,7 +306,112 @@ export async function getConversionRateTable(
 }
 
 // ---------------------------------------------------------------------------
-// 4. Available campaign types (for the filter UI)
+// 4. Excluded-record counts (DASH-13)
+//
+// For the campaigns chart, the "records" universe is Contacts who reached SQL
+// stage. We count:
+//   - Contacts who became SQL in the active date range (the candidate pool)
+//   - Subtract: soft-deleted (filtered at mart layer, so we count separately)
+//   - Subtract: no touchpoints in the 90-day pre-SQL window (i.e., they have a
+//     SQL transition but never engaged with a campaign before it)
+//   - Subtract: only had touchpoints to campaigns OUTSIDE the active type filter
+// Result: the count of Contacts whose attribution credit appears in the chart.
+// ---------------------------------------------------------------------------
+
+export interface ExclusionCounts {
+  total: number;
+  included: number;
+  reasons: Array<{ label: string; count: number; detail?: string }>;
+}
+
+export async function getCampaignsExclusionCounts(args: FilterArgs): Promise<ExclusionCounts> {
+  const dateClause = sql.join(
+    [
+      args.fromDate ? sql`sql_date >= ${args.fromDate}::date` : null,
+      args.toDate ? sql`sql_date <= ${args.toDate}::date` : null,
+    ].filter((c): c is SQL => c !== null),
+    sql` AND `,
+  );
+  const dateFilter = args.fromDate || args.toDate ? sql`AND ${dateClause}` : sql``;
+
+  const rows = await db.execute<{
+    total_sql: string | number;
+    soft_deleted: string | number;
+    no_touchpoints: string | number;
+    with_touchpoints: string | number;
+  }>(sql`
+    WITH eligible AS (
+      SELECT id, account_id, is_deleted, sql_date FROM raw.sf_contact
+       WHERE sql_date IS NOT NULL ${dateFilter}
+    ),
+    with_tp AS (
+      SELECT DISTINCT e.id
+        FROM eligible e
+        JOIN mart.touchpoints t ON t.contact_id = e.id
+       WHERE NOT e.is_deleted
+         AND t.touchpoint_at < e.sql_date
+         AND t.touchpoint_at >= e.sql_date - INTERVAL '90 days'
+    )
+    SELECT
+      (SELECT COUNT(*) FROM eligible)                                     AS total_sql,
+      (SELECT COUNT(*) FROM eligible WHERE is_deleted)                    AS soft_deleted,
+      (SELECT COUNT(*) FROM eligible WHERE NOT is_deleted
+         AND id NOT IN (SELECT id FROM with_tp))                          AS no_touchpoints,
+      (SELECT COUNT(*) FROM with_tp)                                      AS with_touchpoints
+  `);
+  const r = (rows as Array<typeof rows[number]>)[0];
+  const total = Number(r?.total_sql ?? 0);
+  const softDeleted = Number(r?.soft_deleted ?? 0);
+  const noTouchpoints = Number(r?.no_touchpoints ?? 0);
+  let withTouchpoints = Number(r?.with_touchpoints ?? 0);
+
+  // If a type filter is active, subtract Contacts whose in-window touchpoints
+  // are entirely outside the type set.
+  let outsideTypeFilter = 0;
+  if (args.campaignTypes && args.campaignTypes.length > 0) {
+    const typesClause = typesInClause(args.campaignTypes);
+    const inTypeRows = await db.execute<{ n: string | number }>(sql`
+      SELECT COUNT(DISTINCT e.id) AS n
+        FROM raw.sf_contact e
+        JOIN mart.touchpoints t ON t.contact_id = e.id
+        JOIN raw.sf_campaign c ON c.id = t.campaign_id
+       WHERE e.sql_date IS NOT NULL
+         AND NOT e.is_deleted
+         AND t.touchpoint_at <  e.sql_date
+         AND t.touchpoint_at >= e.sql_date - INTERVAL '90 days'
+         ${args.fromDate ? sql`AND e.sql_date >= ${args.fromDate}::date` : sql``}
+         ${args.toDate   ? sql`AND e.sql_date <= ${args.toDate}::date`   : sql``}
+         AND NOT c.is_deleted
+         AND ${typesClause}
+    `);
+    const inType = Number((inTypeRows as Array<{ n: string | number }>)[0]?.n ?? 0);
+    outsideTypeFilter = Math.max(0, withTouchpoints - inType);
+    withTouchpoints = inType;
+  }
+
+  return {
+    total,
+    included: withTouchpoints,
+    reasons: [
+      { label: "soft-deleted contacts", count: softDeleted, detail: "is_deleted = true (Pitfall 12)" },
+      {
+        label: "no touchpoints in 90-day window",
+        count: noTouchpoints,
+        detail: "became SQL but had no CampaignMember in the 90 days before",
+      },
+      ...(outsideTypeFilter > 0
+        ? [{
+            label: "all touchpoints outside the active type filter",
+            count: outsideTypeFilter,
+            detail: `current filter: ${(args.campaignTypes ?? []).join(", ")}`,
+          }]
+        : []),
+    ],
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 5. Available campaign types (for the filter UI)
 // ---------------------------------------------------------------------------
 
 export async function getAvailableCampaignTypes(): Promise<string[]> {
