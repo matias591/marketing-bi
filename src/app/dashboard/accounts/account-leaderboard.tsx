@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import {
   type ColumnDef,
   flexRender,
@@ -9,7 +10,7 @@ import {
   type SortingState,
   useReactTable,
 } from "@tanstack/react-table";
-import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronRight } from "lucide-react";
 import type { AccountLeaderboardRow } from "./query";
 import { cn } from "@/lib/utils";
 
@@ -29,9 +30,14 @@ const columns: ColumnDef<AccountLeaderboardRow>[] = [
     accessorKey: "accountName",
     header: "Account",
     cell: ({ row }) => (
-      <span className="font-medium" title={row.original.accountId}>
+      <Link
+        href={`/dashboard/journey?accountId=${row.original.accountId}`}
+        className="inline-flex items-center gap-1 font-medium hover:underline"
+        title={`See contacts in ${row.original.accountName ?? row.original.accountId}`}
+      >
         {row.original.accountName ?? row.original.accountId}
-      </span>
+        <ChevronRight className="size-3 text-(--color-text-muted)" />
+      </Link>
     ),
   },
   {
