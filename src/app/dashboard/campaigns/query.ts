@@ -100,7 +100,7 @@ export interface CampaignComparisonRow {
   campaignId: string;
   campaignName: string | null;
   campaignType: string | null;
-  creditByModel: { linear: number; first_touch: number; last_touch: number };
+  creditByModel: { w_shaped: number; first_touch: number; last_touch: number };
 }
 
 export async function getCampaignContributionComparison(
@@ -112,7 +112,7 @@ export async function getCampaignContributionComparison(
     campaign_id: string;
     campaign_name: string | null;
     campaign_type: string | null;
-    linear_credit: string | number | null;
+    w_shaped_credit: string | number | null;
     first_credit: string | number | null;
     last_credit: string | number | null;
   }>(sql`
@@ -120,15 +120,15 @@ export async function getCampaignContributionComparison(
       c.id   AS campaign_id,
       c.name AS campaign_name,
       c.type AS campaign_type,
-      COALESCE(SUM(a.credit) FILTER (WHERE a.model = 'linear'), 0)::numeric      AS linear_credit,
+      COALESCE(SUM(a.credit) FILTER (WHERE a.model = 'w_shaped'), 0)::numeric      AS w_shaped_credit,
       COALESCE(SUM(a.credit) FILTER (WHERE a.model = 'first_touch'), 0)::numeric AS first_credit,
       COALESCE(SUM(a.credit) FILTER (WHERE a.model = 'last_touch'), 0)::numeric  AS last_credit
     FROM raw.sf_campaign c
     JOIN mart.attribution_contact a ON a.campaign_id = c.id
     WHERE ${where}
     GROUP BY c.id, c.name, c.type
-    HAVING SUM(a.credit) FILTER (WHERE a.model = 'linear') > 0
-    ORDER BY linear_credit DESC, c.name ASC
+    HAVING SUM(a.credit) FILTER (WHERE a.model = 'w_shaped') > 0
+    ORDER BY w_shaped_credit DESC, c.name ASC
     LIMIT ${topN}
   `);
   return (rows as Array<typeof rows[number]>).map((r) => ({
@@ -136,7 +136,7 @@ export async function getCampaignContributionComparison(
     campaignName: r.campaign_name,
     campaignType: r.campaign_type,
     creditByModel: {
-      linear: Number(r.linear_credit ?? 0),
+      w_shaped: Number(r.w_shaped_credit ?? 0),
       first_touch: Number(r.first_credit ?? 0),
       last_touch: Number(r.last_credit ?? 0),
     },
@@ -185,33 +185,33 @@ export async function getCampaignTypeRollup(args: FilterArgs): Promise<CampaignT
 // Multi-model rollup by campaign type (DASH-12 for type chart)
 export interface CampaignTypeComparisonRow {
   campaignType: string;
-  creditByModel: { linear: number; first_touch: number; last_touch: number };
+  creditByModel: { w_shaped: number; first_touch: number; last_touch: number };
 }
 
 export async function getCampaignTypeRollupComparison(args: FilterArgs): Promise<CampaignTypeComparisonRow[]> {
   const where = attributionWhere(args, "all");
   const rows = await db.execute<{
     campaign_type: string | null;
-    linear_credit: string | number | null;
+    w_shaped_credit: string | number | null;
     first_credit: string | number | null;
     last_credit: string | number | null;
   }>(sql`
     SELECT
       COALESCE(c.type, '(no type)')                                              AS campaign_type,
-      COALESCE(SUM(a.credit) FILTER (WHERE a.model = 'linear'), 0)::numeric      AS linear_credit,
+      COALESCE(SUM(a.credit) FILTER (WHERE a.model = 'w_shaped'), 0)::numeric      AS w_shaped_credit,
       COALESCE(SUM(a.credit) FILTER (WHERE a.model = 'first_touch'), 0)::numeric AS first_credit,
       COALESCE(SUM(a.credit) FILTER (WHERE a.model = 'last_touch'), 0)::numeric  AS last_credit
     FROM raw.sf_campaign c
     JOIN mart.attribution_contact a ON a.campaign_id = c.id
     WHERE ${where}
     GROUP BY COALESCE(c.type, '(no type)')
-    HAVING SUM(a.credit) FILTER (WHERE a.model = 'linear') > 0
-    ORDER BY linear_credit DESC
+    HAVING SUM(a.credit) FILTER (WHERE a.model = 'w_shaped') > 0
+    ORDER BY w_shaped_credit DESC
   `);
   return (rows as Array<typeof rows[number]>).map((r) => ({
     campaignType: r.campaign_type ?? "(no type)",
     creditByModel: {
-      linear: Number(r.linear_credit ?? 0),
+      w_shaped: Number(r.w_shaped_credit ?? 0),
       first_touch: Number(r.first_credit ?? 0),
       last_touch: Number(r.last_credit ?? 0),
     },
@@ -350,7 +350,7 @@ export async function getCampaignsExclusionCounts(args: FilterArgs): Promise<Exc
         JOIN mart.touchpoints t ON t.contact_id = e.id
        WHERE NOT e.is_deleted
          AND t.touchpoint_at < e.sql_date
-         AND t.touchpoint_at >= e.sql_date - INTERVAL '90 days'
+         AND t.touchpoint_at >= e.sql_date - INTERVAL '1 year'
     )
     SELECT
       (SELECT COUNT(*) FROM eligible)                                     AS total_sql,
@@ -378,7 +378,7 @@ export async function getCampaignsExclusionCounts(args: FilterArgs): Promise<Exc
        WHERE e.sql_date IS NOT NULL
          AND NOT e.is_deleted
          AND t.touchpoint_at <  e.sql_date
-         AND t.touchpoint_at >= e.sql_date - INTERVAL '90 days'
+         AND t.touchpoint_at >= e.sql_date - INTERVAL '1 year'
          ${args.fromDate ? sql`AND e.sql_date >= ${args.fromDate}::date` : sql``}
          ${args.toDate   ? sql`AND e.sql_date <= ${args.toDate}::date`   : sql``}
          AND NOT c.is_deleted
@@ -395,9 +395,9 @@ export async function getCampaignsExclusionCounts(args: FilterArgs): Promise<Exc
     reasons: [
       { label: "soft-deleted contacts", count: softDeleted, detail: "is_deleted = true (Pitfall 12)" },
       {
-        label: "no touchpoints in 90-day window",
+        label: "no qualifying touchpoints in 12-month window",
         count: noTouchpoints,
-        detail: "became SQL but had no CampaignMember in the 90 days before",
+        detail: "became SQL but had no Registered/Attended/Responded CampaignMember in the 12 months before",
       },
       ...(outsideTypeFilter > 0
         ? [{

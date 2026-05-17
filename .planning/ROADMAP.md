@@ -54,7 +54,7 @@ Locked by research (Pitfalls 13, 15 — `.planning/research/PITFALLS.md`):
 **Depends on:** Phase 1
 **Requirements:** AUTH-06, DATA-07 (atomic mart refresh — couples to Phase 3 marts), DATA-12 (full INVALID_FIELD resilience), DATA-14 (Slack alerts — pulled in from original P6), DATA-15 (one-shot backfill), PLAT-11 (`/admin/sync` page — pulled in from original P6)
 **Success Criteria** (what must be TRUE):
-  1. Cron schedule promotes from weekly (`0 6 * * 0`) to daily one-per-day-per-object, staggered by hour (Vercel Hobby plan compatible).
+  1. Cron schedule: **weekly full sync** refreshes all 7 SF objects (staggered by object, Vercel Hobby plan compatible); a separate **daily delta sync** runs only for CampaignMember — capturing same-day status changes and new members added by HubSpot automation. All other objects remain weekly-only.
   2. A one-shot backfill script (run from a developer laptop, not from cron) loads the full historical dataset before the first daily-incremental run advances watermarks.
   3. `INVALID_FIELD` errors on one object don't abort the whole sync — affected field is logged to `ops.sync_errors` and the object resyncs without that field on the next run.
   4. After all extracts succeed, marts in `mart.*` (built in Phase 3) are refreshed via `REFRESH MATERIALIZED VIEW CONCURRENTLY` atomically per run; on extract failure, marts retain prior day's data.
@@ -65,26 +65,28 @@ Locked by research (Pitfalls 13, 15 — `.planning/research/PITFALLS.md`):
 **Note:** This phase can run in parallel with or after Phase 3, since the daily-cron and mart-refresh pieces depend on the marts existing. Recommended ordering: P3 marts first → P2 daily promotion + mart refresh together.
 
 ### Phase 3: Attribution Engine
-**Goal:** The marts that compute first-touch, last-touch, and linear multi-touch attribution at Contact and Account level — with methodology locked in (90-day window, per-stage independent credit, strict `<` boundary, touchpoint dedupe, soft-delete filter, OCR equal split) and a methodology page that the marketing director has signed off before any dashboard ships.
+**Goal:** The marts that compute first-touch, last-touch, and W-shaped multi-touch attribution at Contact and Account level — with methodology locked in (**12-month lookback anchored to SQL date**, W-shaped credit model, status-filtered touch points, per-stage independent credit, strict `<` boundary, touchpoint dedupe, soft-delete filter, OCR equal split, data quality flag for Opp date inversions) and a methodology page that the marketing director has signed off before any dashboard ships.
 **Mode:** mvp
 **Depends on:** Phase 1 (sync infrastructure already running; Phase 2 daily-promotion can run in parallel or after this phase)
-**Requirements:** ATTR-01, ATTR-02, ATTR-03, ATTR-04, ATTR-05, ATTR-06, ATTR-07, ATTR-08, ATTR-09, ATTR-10, ATTR-11, ATTR-12, ATTR-13
+**Requirements:** ATTR-01, ATTR-02, ATTR-03, ATTR-04 (updated: 12-month window, not 90-day), ATTR-05, ATTR-06, ATTR-07, ATTR-08, ATTR-09, ATTR-10, ATTR-11, ATTR-12, ATTR-13, DATA-16 (data quality flags)
 **Success Criteria** (what must be TRUE):
-  1. `mart.touchpoints` materialized view contains one row per (Contact, Campaign) pair (deduped on `(contact_id, campaign_id)`); touchpoint timestamp is `COALESCE(first_responded_date, created_date)` of the earliest CampaignMember row; all CampaignMember statuses are included (not filtered to "Responded").
-  2. `mart.attribution_contact` produces, for each Contact, per-stage independent attribution credit at MQL / SQL / Opp / Customer; first-touch and last-touch read from `ops.contact_source_history` value as-of the lifecycle transition date (not the current SF value); linear-multi-touch credit covers campaigns within the 90-day window strictly before each transition (`<`, not `<=`).
+  1. `mart.touchpoints` materialized view contains one row per (Contact, Campaign) pair (deduped on `(contact_id, campaign_id)`); touchpoint timestamp is `COALESCE(first_responded_date, created_date)` of the earliest CampaignMember row; **only CampaignMember rows with status `Registered`, `Attended`, or `Responded` qualify — `Invited`, `Email Opened`, and `Rejected/No Response` are excluded**.
+  2. `mart.attribution_contact` produces, for each Contact, per-stage independent attribution credit at MQL / SQL / Opp / Customer; first-touch and last-touch read from `ops.contact_source_history` value as-of the lifecycle transition date (not the current SF value); **W-shaped multi-touch credit: First Touch = 1 pt, Last Touch = 1 pt, each Middle Touch = 1 pt (total = N touch points); lookback window is 12 months anchored to SQL create date for all stages** (not per-stage date), applied strictly before each transition (`<`, not `<=`).
   3. `mart.attribution_account` is a `GROUP BY account_id` rollup of `mart.attribution_contact` joined through the `account_id` snapshot as-of the lifecycle event (not current Account); attribution queries filter `WHERE NOT contact.is_deleted`; Closed Won credit splits equally across all `OpportunityContactRole` Contacts.
   4. A "How attribution is computed" methodology page is reachable from every dashboard header and documents: model definitions, the 90-day window, per-stage independence, OCR equal-split, deletion-filter behavior, and known divergences from Salesforce native reports.
-  5. Vitest unit tests assert that `mart.attribution_contact` (SQL) and `lib/attribution/linear.ts` (TypeScript reference implementation) produce identical credit splits on a seeded fixture set; the marketing director has signed off the methodology page before any dashboard work begins.
+  5. Vitest unit tests assert that `mart.attribution_contact` (SQL) and `lib/attribution/wshape.ts` (TypeScript reference implementation) produce identical credit splits on a seeded fixture set; the marketing director has signed off the methodology page before any dashboard work begins.
+  6. Data quality: `mart.data_quality_flags` surfaces (a) Opportunities where `opportunity_create_date < sql_create_date` and (b) Opportunities with no associated SQL date on the Contact; these records are included in all other marts but flagged — not silently excluded.
 **Plans:** TBD
 
 ### Phase 4: G1 + G4 Dashboards (Campaign + Revenue)
 **Goal:** The two highest-priority dashboards live — Campaign Contribution to SQLs (G1, "loudest user need") and Revenue & Closed Won (G4, "highest stakes") — with the global filter bar, date picker, model toggle, model-comparison view, and excluded-record reasons that every subsequent dashboard inherits.
 **Mode:** mvp
 **Depends on:** Phase 3
-**Requirements:** DASH-01, DASH-02, DASH-03, DASH-04, DASH-12, DASH-13, PLAT-01, PLAT-02, PLAT-03, PLAT-04, PLAT-05, PLAT-06, PLAT-08
+**Requirements:** DASH-01, DASH-02, DASH-03, DASH-04, DASH-12, DASH-13, DASH-14, PLAT-01, PLAT-02, PLAT-03, PLAT-04, PLAT-05, PLAT-06, PLAT-08
 **Success Criteria** (what must be TRUE):
-  1. The Campaign Contribution to SQLs page (`/dashboard/campaigns`) renders a sortable top-N bar chart of SQLs per campaign, a campaign-type rollup view (grouped/stacked), and an Engagement → SQL conversion-rate sortable table on the same page — and stays within the 3–4 primary charts cap.
-  2. The Revenue & Closed Won page (`/dashboard/revenue`) renders Closed Won revenue by campaign and campaign type, showing both `$` value and `%` of total, with the attribution model toggle applied.
+  1. **Funnel View** (`/dashboard/funnel`, DASH-14): renders MQL → SQL → Opportunity → Customer counts and stage-to-stage conversion rates for the selected date period, with date-range filtering. This is the default landing page.
+  2. The **Campaign Attribution Table** (`/dashboard/campaigns`): renders a sortable top-N bar chart of SQLs per campaign, a **Campaign Type rollup view** (grouped/stacked, covering webinar / invite / email / etc.), per-campaign attribution credits (First / Last / Middle), and an Engagement → SQL conversion-rate sortable table — within the 3–4 primary charts cap.
+  3. The Revenue & Closed Won page (`/dashboard/revenue`) renders Closed Won revenue by campaign and campaign type, showing both `$` value and `%` of total, with the attribution model toggle applied.
   3. A global date-range picker (presets: Last 7/30/90 days, This/Last Month, This/Last Quarter, YTD, Custom), a global filter bar (campaign type, lifecycle stage, account segment, owner), and an attribution-model toggle (First / Last / Linear) all affect every chart on each page; all filter / model / date state lives in URL `searchParams` (zod-parsed) so refresh and copy-link preserve the exact view.
   4. A side-by-side attribution-model comparison view shows the same metric under First / Last / Linear simultaneously on G1 and G4; every chart exposes a small "N records excluded ▸" affordance listing why (deleted, no campaign membership, etc.).
   5. A freshness indicator in each dashboard header reads `MAX(synced_at)` from data (not the cron schedule), color-coded green (<24h) / yellow (24–48h) / red (>48h); date filters convert via `AT TIME ZONE` using a project-wide business timezone (default `America/New_York`, configurable via env), with the active TZ visible near the date picker.
@@ -135,13 +137,13 @@ Locked by research (Pitfalls 13, 15 — `.planning/research/PITFALLS.md`):
 | Category | Total | Phase 1 | Phase 2 | Phase 3 | Phase 4 | Phase 5 | Phase 6 |
 |----------|-------|---------|---------|---------|---------|---------|---------|
 | AUTH | 6 | 4 | 1 | — | — | — | 1 |
-| DATA | 15 | — | 14 | — | — | — | 1 |
+| DATA | 16 | — | 14 | 1 (DATA-16) | — | — | 1 |
 | ATTR | 13 | — | — | 13 | — | — | — |
-| DASH | 13 | — | — | — | 6 | 5 | 2 |
+| DASH | 14 | — | — | — | 7 (incl. DASH-14) | 5 | 2 |
 | PLAT | 12 | 1 | — | — | 7 | 2 | 2 |
-| **Total** | **59** | **5** | **15** | **13** | **13** | **7** | **6** |
+| **Total** | **61** | **5** | **15** | **14** | **14** | **7** | **6** |
 
-**Mapped:** 59 / 59 ✓
+**Mapped:** 61 / 61 ✓ (added DASH-14 Funnel View, DATA-16 Data Quality Flags — 2026-05-17 business call)
 **Orphans:** 0
 **Duplicates:** 0
 
@@ -155,7 +157,7 @@ Locked by research (Pitfalls 13, 15 — `.planning/research/PITFALLS.md`):
 | 4 — Supavisor + prepared statements | P1 (connection pattern documented) + P4/P5 (5-concurrent smoke test) |
 | 5 — Edge runtime breaks `pg` | P1 (`PLAT-12` runtime nodejs everywhere) |
 | 6 — `Original Source` rewrites | P2 (`DATA-09` snapshot history on first sync) |
-| 7 — Unbounded multi-touch | P3 (`ATTR-04` 90-day window) |
+| 7 — Unbounded multi-touch | P3 (`ATTR-04` 12-month window anchored to SQL date — updated 2026-05-17 from 90-day) |
 | 8 — SF report reconciliation | P3 (`ATTR-12` methodology page signed off before dashboards) |
 | 9 — Supabase free-tier pause | P2 (`DATA-13` keep-alive) |
 | 10 — Custom-field drift | P2 (`DATA-12` `INVALID_FIELD` resilience) |

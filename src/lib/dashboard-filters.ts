@@ -11,7 +11,7 @@
  */
 import { z } from "zod";
 
-export const ATTRIBUTION_MODELS = ["linear", "first_touch", "last_touch"] as const;
+export const ATTRIBUTION_MODELS = ["w_shaped", "first_touch", "last_touch"] as const;
 export type AttributionModel = (typeof ATTRIBUTION_MODELS)[number];
 
 export const DATE_PRESETS = [
@@ -29,7 +29,7 @@ export const DATE_PRESETS = [
 export type DatePreset = (typeof DATE_PRESETS)[number];
 
 export const FilterSchema = z.object({
-  model: z.enum(ATTRIBUTION_MODELS).default("linear"),
+  model: z.enum(ATTRIBUTION_MODELS).default("w_shaped"),
   preset: z.enum(DATE_PRESETS).default("last_90_days"),
   // Custom date range — only used when preset === "custom"
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),

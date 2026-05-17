@@ -65,6 +65,10 @@ export const SF_OBJECTS: SfObjectDef[] = [
     // Source fields:
     //   - LeadSource (standard field) is the "original source" equivalent
     //   - Last_Lead_Source__c (custom) is the "latest source" equivalent
+    //   - HubSpot_MQL_Date__c — HubSpot MQL date synced into SF Contact.
+    //     VERIFY the exact API name against your org before deploying.
+    //     The INVALID_FIELD self-heal in sync.ts will strip it gracefully if
+    //     the name is wrong; check ops.sync_errors after the first run.
     fields: [
       "Id",
       "AccountId",
@@ -73,6 +77,7 @@ export const SF_OBJECTS: SfObjectDef[] = [
       "LastName",
       "Lifecycle_Stage__c",
       "SQL_Date__c",
+      "HubSpot_MQL_Date__c",
       "LeadSource",
       "Last_Lead_Source__c",
       "IsDeleted",
@@ -88,7 +93,7 @@ export const SF_OBJECTS: SfObjectDef[] = [
       first_name: sfString(r.FirstName),
       last_name: sfString(r.LastName),
       lifecycle_stage: sfString(r.Lifecycle_Stage__c),
-      mql_date: null,
+      mql_date: sfDate(r.HubSpot_MQL_Date__c),
       sql_date: sfDate(r.SQL_Date__c),
       opportunity_date: null,
       customer_date: null,
@@ -126,6 +131,8 @@ export const SF_OBJECTS: SfObjectDef[] = [
       "IsDeleted",
       "StartDate",
       "EndDate",
+      "BudgetedCost",
+      "ActualCost",
       "CreatedDate",
       "LastModifiedDate",
     ],
@@ -140,6 +147,8 @@ export const SF_OBJECTS: SfObjectDef[] = [
       is_deleted: sfBool(r.IsDeleted),
       start_date: sfDate(r.StartDate),
       end_date: sfDate(r.EndDate),
+      budgeted_cost: r.BudgetedCost == null ? null : String(r.BudgetedCost),
+      actual_cost: r.ActualCost == null ? null : String(r.ActualCost),
       created_date: sfTimestamp(r.CreatedDate),
       last_modified_date: sfTimestamp(r.LastModifiedDate),
     }),

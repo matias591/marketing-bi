@@ -28,7 +28,7 @@ const PRESET_LABELS: Record<DatePreset, string> = {
 };
 
 const MODEL_LABELS: Record<AttributionModel, string> = {
-  linear: "Linear",
+  w_shaped: "W-Shaped",
   first_touch: "First touch",
   last_touch: "Last touch",
 };

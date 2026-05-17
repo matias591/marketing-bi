@@ -119,7 +119,7 @@ async function TopCampaignsCard({ args, compare }: { args: QueryArgs; compare: b
     const chartRows = rows.map((r) => ({
       label: r.campaignName ?? r.campaignId,
       sublabel: r.campaignType ?? undefined,
-      linear: r.creditByModel.linear,
+      w_shaped: r.creditByModel.w_shaped,
       first_touch: r.creditByModel.first_touch,
       last_touch: r.creditByModel.last_touch,
     }));
@@ -189,7 +189,7 @@ async function TypeRollupCard({ args, compare }: { args: QueryArgs; compare: boo
     const rows = await getCampaignTypeRollupComparison(args);
     const chartRows = rows.map((r) => ({
       label: r.campaignType,
-      linear: r.creditByModel.linear,
+      w_shaped: r.creditByModel.w_shaped,
       first_touch: r.creditByModel.first_touch,
       last_touch: r.creditByModel.last_touch,
     }));
@@ -286,9 +286,9 @@ function modelDescription(model: string): string {
       return "First-touch credit (1.0 to the earliest in-window touchpoint).";
     case "last_touch":
       return "Last-touch credit (1.0 to the latest in-window touchpoint).";
-    case "linear":
+    case "w_shaped":
     default:
-      return "Linear-multi-touch credit (1/N split across in-window touchpoints).";
+      return "W-shaped multi-touch credit (1 absolute point per qualifying touchpoint).";
   }
 }
 

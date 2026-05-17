@@ -229,7 +229,7 @@ export async function getCommonJourneys(topN = 15): Promise<CommonJourneyRow[]> 
         AND c.sql_date IS NOT NULL
         AND camp.type IS NOT NULL
         AND t.touchpoint_at <  c.sql_date
-        AND t.touchpoint_at >= c.sql_date - INTERVAL '90 days'
+        AND t.touchpoint_at >= c.sql_date - INTERVAL '1 year'
     ),
     firsts AS (
       SELECT contact_id, campaign_type AS first_type FROM windowed WHERE rn_first = 1

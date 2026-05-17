@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, Coins, Route, Building2, Layers, BookOpen, Settings2 } from "lucide-react";
+import { TrendingDown, BarChart3, Coins, Route, Building2, Layers, BookOpen, Settings2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface NavItem {
@@ -14,6 +14,7 @@ interface NavItem {
 }
 
 const NAV: NavItem[] = [
+  { href: "/dashboard/funnel", label: "Funnel", icon: TrendingDown, enabled: true },
   { href: "/dashboard/campaigns", label: "Campaigns (G1)", icon: BarChart3, enabled: true },
   { href: "/dashboard/revenue", label: "Revenue (G4)", icon: Coins, enabled: true },
   { href: "/dashboard/journey", label: "Contact Journey (G2)", icon: Route, enabled: true },

@@ -35,12 +35,14 @@ interface CountRow {
  */
 async function getDepthRows(stage: Stage, args: DepthFilters): Promise<CountRow[]> {
   const transitionCol = stage === "sql" ? sql`c.sql_date` : sql`lt.customer_date`;
+  // Window anchor is always sql_date (12-month from SQL for all stages).
+  const windowAnchor = stage === "sql" ? sql`c.sql_date` : sql`lt.sql_date`;
   const sourceJoin = stage === "sql"
     ? sql`raw.sf_contact c`
     : sql`raw.sf_contact c JOIN mart.lifecycle_transitions lt ON lt.contact_id = c.id`;
   const stageFilter = stage === "sql"
     ? sql`c.sql_date IS NOT NULL`
-    : sql`lt.customer_date IS NOT NULL`;
+    : sql`lt.customer_date IS NOT NULL AND lt.sql_date IS NOT NULL`;
 
   const dateConds: SQL[] = [];
   if (args.fromDate) dateConds.push(sql`${transitionCol} >= ${args.fromDate}::date`);
@@ -62,7 +64,7 @@ async function getDepthRows(stage: Stage, args: DepthFilters): Promise<CountRow[
        AND NOT camp.is_deleted
        AND ${stageFilter}
        AND t.touchpoint_at <  ${transitionCol}
-       AND t.touchpoint_at >= ${transitionCol} - INTERVAL '90 days'
+       AND t.touchpoint_at >= ${windowAnchor} - INTERVAL '1 year'
        ${dateClause}
        ${typeClause}
      GROUP BY c.id

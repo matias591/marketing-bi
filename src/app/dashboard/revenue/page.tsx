@@ -136,7 +136,7 @@ async function RevenueByCampaignCard({ args, compare }: { args: QueryArgs; compa
     const chartRows = rows.map((r) => ({
       label: r.campaignName ?? r.campaignId,
       sublabel: r.campaignType ?? undefined,
-      linear: r.revenueByModel.linear,
+      w_shaped: r.revenueByModel.w_shaped,
       first_touch: r.revenueByModel.first_touch,
       last_touch: r.revenueByModel.last_touch,
     }));
@@ -144,7 +144,7 @@ async function RevenueByCampaignCard({ args, compare }: { args: QueryArgs; compa
       <Card>
         <CardHeader>
           <CardTitle>Top {rows.length} campaigns by revenue · all models</CardTitle>
-          <CardDescription>Revenue under linear, first-touch, and last-touch side by side.</CardDescription>
+          <CardDescription>Revenue under W-shaped, first-touch, and last-touch side by side.</CardDescription>
         </CardHeader>
         <CardContent className="p-0">
           <div className="px-6 py-2">
@@ -204,7 +204,7 @@ async function RevenueByTypeCard({ args, compare }: { args: QueryArgs; compare: 
     const rows = await getRevenueByCampaignTypeComparison(args);
     const chartRows = rows.map((r) => ({
       label: r.campaignType,
-      linear: r.revenueByModel.linear,
+      w_shaped: r.revenueByModel.w_shaped,
       first_touch: r.revenueByModel.first_touch,
       last_touch: r.revenueByModel.last_touch,
     }));

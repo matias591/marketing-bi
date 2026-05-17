@@ -3,10 +3,10 @@
  *
  * Reads from `mart.opportunity_credit` which already encodes:
  *   - ATTR-11 OCR equal-split per Closed Won Opp
- *   - Customer-stage attribution credit weights (linear / first / last)
+ *   - Customer-stage attribution credit weights (w_shaped / first / last)
  *
  * Filter dimensions:
- *   - model (linear / first_touch / last_touch)
+ *   - model (w_shaped / first_touch / last_touch)
  *   - close_date range (when the Opp closed-won)
  *   - campaign type set
  */
@@ -139,7 +139,7 @@ export interface RevenueComparisonRow {
   campaignId: string;
   campaignName: string | null;
   campaignType: string | null;
-  revenueByModel: { linear: number; first_touch: number; last_touch: number };
+  revenueByModel: { w_shaped: number; first_touch: number; last_touch: number };
 }
 
 export async function getRevenueByCampaignComparison(
@@ -151,7 +151,7 @@ export async function getRevenueByCampaignComparison(
     campaign_id: string;
     campaign_name: string | null;
     campaign_type: string | null;
-    linear_rev: string | number | null;
+    w_shaped_rev: string | number | null;
     first_rev: string | number | null;
     last_rev: string | number | null;
   }>(sql`
@@ -159,15 +159,15 @@ export async function getRevenueByCampaignComparison(
       c.id   AS campaign_id,
       c.name AS campaign_name,
       c.type AS campaign_type,
-      COALESCE(SUM(r.revenue_credit) FILTER (WHERE r.model = 'linear'), 0)::numeric      AS linear_rev,
+      COALESCE(SUM(r.revenue_credit) FILTER (WHERE r.model = 'w_shaped'), 0)::numeric      AS w_shaped_rev,
       COALESCE(SUM(r.revenue_credit) FILTER (WHERE r.model = 'first_touch'), 0)::numeric AS first_rev,
       COALESCE(SUM(r.revenue_credit) FILTER (WHERE r.model = 'last_touch'), 0)::numeric  AS last_rev
     FROM raw.sf_campaign c
     JOIN mart.opportunity_credit r ON r.campaign_id = c.id
     WHERE ${where}
     GROUP BY c.id, c.name, c.type
-    HAVING SUM(r.revenue_credit) FILTER (WHERE r.model = 'linear') > 0
-    ORDER BY linear_rev DESC, c.name ASC
+    HAVING SUM(r.revenue_credit) FILTER (WHERE r.model = 'w_shaped') > 0
+    ORDER BY w_shaped_rev DESC, c.name ASC
     LIMIT ${topN}
   `);
   return (rows as Array<typeof rows[number]>).map((r) => ({
@@ -175,7 +175,7 @@ export async function getRevenueByCampaignComparison(
     campaignName: r.campaign_name,
     campaignType: r.campaign_type,
     revenueByModel: {
-      linear: Number(r.linear_rev ?? 0),
+      w_shaped: Number(r.w_shaped_rev ?? 0),
       first_touch: Number(r.first_rev ?? 0),
       last_touch: Number(r.last_rev ?? 0),
     },
@@ -185,33 +185,33 @@ export async function getRevenueByCampaignComparison(
 // Revenue by type comparison
 export interface RevenueByTypeComparisonRow {
   campaignType: string;
-  revenueByModel: { linear: number; first_touch: number; last_touch: number };
+  revenueByModel: { w_shaped: number; first_touch: number; last_touch: number };
 }
 
 export async function getRevenueByCampaignTypeComparison(args: RevenueFilterArgs): Promise<RevenueByTypeComparisonRow[]> {
   const where = revenueWhere(args, "all");
   const rows = await db.execute<{
     campaign_type: string | null;
-    linear_rev: string | number | null;
+    w_shaped_rev: string | number | null;
     first_rev: string | number | null;
     last_rev: string | number | null;
   }>(sql`
     SELECT
       COALESCE(c.type, '(no type)')                                                      AS campaign_type,
-      COALESCE(SUM(r.revenue_credit) FILTER (WHERE r.model = 'linear'), 0)::numeric      AS linear_rev,
+      COALESCE(SUM(r.revenue_credit) FILTER (WHERE r.model = 'w_shaped'), 0)::numeric      AS w_shaped_rev,
       COALESCE(SUM(r.revenue_credit) FILTER (WHERE r.model = 'first_touch'), 0)::numeric AS first_rev,
       COALESCE(SUM(r.revenue_credit) FILTER (WHERE r.model = 'last_touch'), 0)::numeric  AS last_rev
     FROM raw.sf_campaign c
     JOIN mart.opportunity_credit r ON r.campaign_id = c.id
     WHERE ${where}
     GROUP BY COALESCE(c.type, '(no type)')
-    HAVING SUM(r.revenue_credit) FILTER (WHERE r.model = 'linear') > 0
-    ORDER BY linear_rev DESC
+    HAVING SUM(r.revenue_credit) FILTER (WHERE r.model = 'w_shaped') > 0
+    ORDER BY w_shaped_rev DESC
   `);
   return (rows as Array<typeof rows[number]>).map((r) => ({
     campaignType: r.campaign_type ?? "(no type)",
     revenueByModel: {
-      linear: Number(r.linear_rev ?? 0),
+      w_shaped: Number(r.w_shaped_rev ?? 0),
       first_touch: Number(r.first_rev ?? 0),
       last_touch: Number(r.last_rev ?? 0),
     },

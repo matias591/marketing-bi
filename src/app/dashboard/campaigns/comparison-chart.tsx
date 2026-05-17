@@ -16,7 +16,7 @@ const ReactECharts = dynamic(() => import("echarts-for-react").then((m) => m.def
 export interface ComparisonRow {
   label: string;
   sublabel?: string;
-  linear: number;
+  w_shaped: number;
   first_touch: number;
   last_touch: number;
 }
@@ -39,11 +39,11 @@ function formatValue(v: number, fmt: "credit" | "currency") {
 
 export function ComparisonChart({ data, valueFormat = "credit" }: Props) {
   const option = useMemo<EChartsOption>(() => {
-    const sorted = [...data].sort((a, b) => a.linear - b.linear);
+    const sorted = [...data].sort((a, b) => a.w_shaped - b.w_shaped);
     const labels = sorted.map((r) => r.label);
 
     const seriesColors = {
-      linear: "#1f6feb",
+      w_shaped: "#1f6feb",
       first_touch: "#9a6700",
       last_touch: "#cf222e",
     };
@@ -68,7 +68,7 @@ export function ComparisonChart({ data, valueFormat = "credit" }: Props) {
           const row = sorted[idx];
           return `<strong>${row.label}</strong>` +
             (row.sublabel ? `<br/><span style="color:#5b6573">${row.sublabel}</span>` : "") +
-            `<br/>Linear: ${formatValue(row.linear, valueFormat)}` +
+            `<br/>Linear: ${formatValue(row.w_shaped, valueFormat)}` +
             `<br/>First touch: ${formatValue(row.first_touch, valueFormat)}` +
             `<br/>Last touch: ${formatValue(row.last_touch, valueFormat)}`;
         },
@@ -89,8 +89,8 @@ export function ComparisonChart({ data, valueFormat = "credit" }: Props) {
         {
           name: "Linear",
           type: "bar",
-          data: sorted.map((r) => r.linear),
-          itemStyle: { color: seriesColors.linear, borderRadius: [0, 3, 3, 0] },
+          data: sorted.map((r) => r.w_shaped),
+          itemStyle: { color: seriesColors.w_shaped, borderRadius: [0, 3, 3, 0] },
           barMaxWidth: 12,
         },
         {

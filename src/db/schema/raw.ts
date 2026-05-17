@@ -54,6 +54,8 @@ export const sfCampaign = raw.table("sf_campaign", {
   isDeleted: boolean().notNull().default(false),
   startDate: date(),
   endDate: date(),
+  budgetedCost: text(),
+  actualCost: text(),
   createdDate: timestamp({ withTimezone: true }),
   lastModifiedDate: timestamp({ withTimezone: true }),
   syncedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),

@@ -3,14 +3,27 @@
  *
  * Mirrors `mart.attribution_contact` — drives the parity test in
  * `src/lib/attribution/__tests__/attribution.test.ts` to catch drift between
- * the SQL marts and the documented methodology. Also serves as readable
- * documentation for the methodology page (`/methodology`).
+ * the SQL marts and the documented methodology.
  *
  * The SQL is the production query; this TS impl is the spec-as-code.
+ *
+ * Methodology (2026-05-17 business call):
+ *   - Touch points: only CampaignMember rows with status Registered / Attended /
+ *     Responded qualify. Invited, Email Opened, Rejected/No Response are excluded.
+ *   - Window: 12 months anchored to sql_date for ALL stages. For MQL (which may
+ *     predate SQL), falls back to mql_date when sql_date is null.
+ *   - W-shaped model: every qualifying touch point earns 1 absolute credit point.
+ *     First-touch and last-touch earn 1.0 credit to the single earliest/latest touch.
  */
 
 export type Stage = "mql" | "sql" | "opp" | "customer";
-export type Model = "first_touch" | "last_touch" | "linear";
+export type Model = "w_shaped" | "first_touch" | "last_touch";
+
+export const ATTRIBUTION_ELIGIBLE_STATUSES = new Set([
+  "Registered",
+  "Attended",
+  "Responded",
+]);
 
 export interface Contact {
   id: string;
@@ -30,6 +43,7 @@ export interface LifecycleTransition {
   accountId: string | null;
   stage: Stage;
   transitionDate: string; // ISO date
+  sqlDate: string | null; // anchor for the 12-month window
 }
 
 export interface CreditRow {
@@ -42,27 +56,16 @@ export interface CreditRow {
   transitionDate: string;
 }
 
-const WINDOW_DAYS = 90;
-
-/**
- * Subtract `days` days from an ISO date and return a new ISO date.
- * Pure date math; no timezone mucking — same as Postgres `date - INTERVAL '90 days'`.
- */
-function shiftDate(iso: string, days: number): string {
+/** Subtract `months` calendar months from an ISO date. */
+function shiftMonths(iso: string, months: number): string {
   const d = new Date(`${iso}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
+  d.setUTCMonth(d.getUTCMonth() - months);
   return d.toISOString().slice(0, 10);
 }
 
 /**
- * Compute lifecycle transitions for a Contact set.
- * Mirrors mart.lifecycle_transitions — minus MQL (first Presentation),
- * Opp, and Customer dates which the test seeds directly.
- *
- * For the parity test we accept transitions explicitly so the test can
- * exercise the windowing/credit logic without re-implementing every
- * derivation rule. The SQL view does the derivation; the test agrees with
- * its outputs on a fixture.
+ * Compute lifecycle transitions for a Contact set, propagating each Contact's
+ * sqlDate so the windowing in `computeAttribution` can anchor to it.
  */
 export function buildLifecycleTransitions(
   contacts: Contact[],
@@ -73,19 +76,22 @@ export function buildLifecycleTransitions(
   } = {},
 ): LifecycleTransition[] {
   const out: LifecycleTransition[] = [];
-  const stageMap: Array<[Stage, (c: Contact) => string | null | undefined]> = [
-    ["mql", (c) => perStageDates.mqlDate?.get(c.id)],
-    ["sql", (c) => c.sqlDate],
-    ["opp", (c) => perStageDates.oppDate?.get(c.id)],
-    ["customer", (c) => perStageDates.customerDate?.get(c.id)],
-  ];
 
   for (const c of contacts) {
     if (c.isDeleted) continue;
-    for (const [stage, getDate] of stageMap) {
-      const dt = getDate(c);
-      if (dt) out.push({ contactId: c.id, accountId: c.accountId, stage, transitionDate: dt });
-    }
+    const mql = perStageDates.mqlDate?.get(c.id);
+    const opp = perStageDates.oppDate?.get(c.id);
+    const customer = perStageDates.customerDate?.get(c.id);
+
+    if (mql)
+      out.push({ contactId: c.id, accountId: c.accountId, stage: "mql", transitionDate: mql, sqlDate: c.sqlDate });
+    if (c.sqlDate)
+      out.push({ contactId: c.id, accountId: c.accountId, stage: "sql", transitionDate: c.sqlDate, sqlDate: c.sqlDate });
+    // Opp and Customer only emit when sql_date is known (mirror SQL behavior).
+    if (opp && c.sqlDate)
+      out.push({ contactId: c.id, accountId: c.accountId, stage: "opp", transitionDate: opp, sqlDate: c.sqlDate });
+    if (customer && c.sqlDate)
+      out.push({ contactId: c.id, accountId: c.accountId, stage: "customer", transitionDate: customer, sqlDate: c.sqlDate });
   }
   return out;
 }
@@ -93,15 +99,17 @@ export function buildLifecycleTransitions(
 /**
  * Compute attribution credit for every (contact, stage, model, campaign).
  *
- * The window is [transitionDate - 90 days, transitionDate) — strictly less
- * than the transition (ATTR-06). All three models compute simultaneously so
- * the dashboard's model-toggle has all values pre-materialized.
+ * Window: [window_start, transition_date) strictly less than the transition.
+ *   window_start = COALESCE(sqlDate, transitionDate) − 12 months
+ *
+ * W-shaped: each qualifying touch = 1.0 absolute credit point.
+ * First-touch: 1.0 to the campaign with the earliest in-window touch.
+ * Last-touch: 1.0 to the campaign with the latest in-window touch.
  */
 export function computeAttribution(
   transitions: LifecycleTransition[],
   touchpoints: Touchpoint[],
 ): CreditRow[] {
-  // Index touchpoints by contact for fast windowing.
   const tpByContact = new Map<string, Touchpoint[]>();
   for (const tp of touchpoints) {
     if (!tpByContact.has(tp.contactId)) tpByContact.set(tp.contactId, []);
@@ -111,14 +119,14 @@ export function computeAttribution(
   const out: CreditRow[] = [];
 
   for (const t of transitions) {
-    const lowerBound = shiftDate(t.transitionDate, -WINDOW_DAYS);
+    const anchor = t.sqlDate ?? t.transitionDate;
+    const windowStart = shiftMonths(anchor, 12);
+
     const inWindow = (tpByContact.get(t.contactId) ?? []).filter(
-      (tp) => tp.touchpointAt < t.transitionDate && tp.touchpointAt >= lowerBound,
+      (tp) => tp.touchpointAt < t.transitionDate && tp.touchpointAt >= windowStart,
     );
     if (inWindow.length === 0) continue;
 
-    // Stable ordering matches SQL: ASC for first, DESC for last; campaign_id
-    // tiebreak (ASC for first, DESC for last) per the ROW_NUMBER OVER clauses.
     const sortedAsc = [...inWindow].sort((a, b) => {
       if (a.touchpointAt !== b.touchpointAt) return a.touchpointAt < b.touchpointAt ? -1 : 1;
       return a.campaignId < b.campaignId ? -1 : 1;
@@ -128,20 +136,19 @@ export function computeAttribution(
       return a.campaignId > b.campaignId ? -1 : 1;
     });
 
-    // Linear: 1/N to each
-    const n = inWindow.length;
+    // W-shaped: 1 absolute point per qualifying touch
     for (const tp of inWindow) {
       out.push({
         contactId: t.contactId,
         accountId: t.accountId,
         stage: t.stage,
-        model: "linear",
+        model: "w_shaped",
         campaignId: tp.campaignId,
-        credit: round(1.0 / n, 6),
+        credit: 1.0,
         transitionDate: t.transitionDate,
       });
     }
-    // First-touch: 1.0 to earliest
+    // First-touch
     out.push({
       contactId: t.contactId,
       accountId: t.accountId,
@@ -151,7 +158,7 @@ export function computeAttribution(
       credit: 1.0,
       transitionDate: t.transitionDate,
     });
-    // Last-touch: 1.0 to latest
+    // Last-touch
     out.push({
       contactId: t.contactId,
       accountId: t.accountId,
@@ -164,9 +171,4 @@ export function computeAttribution(
   }
 
   return out;
-}
-
-function round(n: number, places: number): number {
-  const f = 10 ** places;
-  return Math.round(n * f) / f;
 }

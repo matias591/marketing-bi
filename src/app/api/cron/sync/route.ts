@@ -42,7 +42,10 @@ export async function GET(request: NextRequest) {
     return unauthorized("invalid or missing cron secret");
   }
 
-  return runSync({ triggeredBy: "cron" });
+  // ?mode=delta → sync only CampaignMember (daily delta for status changes).
+  // No mode param → full sync of all 7 objects (weekly).
+  const mode = request.nextUrl.searchParams.get("mode");
+  return runSync({ triggeredBy: "cron", deltaOnly: mode === "delta" });
 }
 
 // Allow manual `POST /api/cron/sync` from a developer laptop with the secret in
@@ -53,14 +56,16 @@ export async function POST(request: NextRequest) {
   if (!expected || auth !== `Bearer ${expected}`) {
     return unauthorized("invalid or missing cron secret");
   }
-  return runSync({ triggeredBy: "manual" });
+  const mode = request.nextUrl.searchParams.get("mode");
+  return runSync({ triggeredBy: "manual", deltaOnly: mode === "delta" });
 }
 
 interface RunOptions {
   triggeredBy: "cron" | "manual";
+  deltaOnly?: boolean; // when true, sync only CampaignMember
 }
 
-async function runSync({ triggeredBy }: RunOptions) {
+async function runSync({ triggeredBy, deltaOnly = false }: RunOptions) {
   const dbUrl = process.env.DATABASE_URL;
   if (!dbUrl) {
     return NextResponse.json(
@@ -94,7 +99,12 @@ async function runSync({ triggeredBy }: RunOptions) {
     const conn = await getJsforceConnection();
 
     // 5. Per-object sync (continue on error).
-    for (const obj of SF_OBJECTS) {
+    // Delta mode syncs only CampaignMember (daily status-change capture).
+    const objectsToSync = deltaOnly
+      ? SF_OBJECTS.filter((o) => o.name === "CampaignMember")
+      : SF_OBJECTS;
+
+    for (const obj of objectsToSync) {
       try {
         const stats = await syncObject(obj, { conn, sql, runId, log });
         rowCounts[obj.name] = stats;
@@ -111,22 +121,27 @@ async function runSync({ triggeredBy }: RunOptions) {
 
     // 5b. Refresh attribution marts (Phase 3) — only when at least some
     //     extracts succeeded. CONCURRENTLY keeps the dashboards queryable.
-    if (errors.length < SF_OBJECTS.length) {
+    if (errors.length < objectsToSync.length) {
       log("refreshing marts");
       try {
-        await sql.unsafe(`REFRESH MATERIALIZED VIEW CONCURRENTLY mart.lifecycle_transitions`);
+        if (!deltaOnly) {
+          // Full sync: refresh all marts including lifecycle_transitions.
+          await sql.unsafe(`REFRESH MATERIALIZED VIEW CONCURRENTLY mart.lifecycle_transitions`);
+        }
+        // Both full and delta refresh the touchpoints + attribution chain.
         await sql.unsafe(`REFRESH MATERIALIZED VIEW CONCURRENTLY mart.touchpoints`);
         await sql.unsafe(`REFRESH MATERIALIZED VIEW CONCURRENTLY mart.attribution_contact`);
         await sql.unsafe(`REFRESH MATERIALIZED VIEW CONCURRENTLY mart.attribution_account`);
         await sql.unsafe(`REFRESH MATERIALIZED VIEW CONCURRENTLY mart.opportunity_credit`);
-        // ANALYZE so the query planner has fresh stats; CONCURRENTLY refresh
-        // doesn't trigger autovacuum, so without this the planner can pick
-        // bad plans on the fresh data and dashboard queries hang.
-        await sql.unsafe(`ANALYZE mart.lifecycle_transitions`);
+        await sql.unsafe(`REFRESH MATERIALIZED VIEW CONCURRENTLY mart.data_quality_flags`);
+        if (!deltaOnly) {
+          await sql.unsafe(`ANALYZE mart.lifecycle_transitions`);
+        }
         await sql.unsafe(`ANALYZE mart.touchpoints`);
         await sql.unsafe(`ANALYZE mart.attribution_contact`);
         await sql.unsafe(`ANALYZE mart.attribution_account`);
         await sql.unsafe(`ANALYZE mart.opportunity_credit`);
+        await sql.unsafe(`ANALYZE mart.data_quality_flags`);
         log("marts refreshed");
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
@@ -142,7 +157,7 @@ async function runSync({ triggeredBy }: RunOptions) {
     }
 
     // 6. Close out.
-    const status = errors.length === 0 ? "success" : errors.length >= SF_OBJECTS.length ? "failed" : "partial";
+    const status = errors.length === 0 ? "success" : errors.length >= objectsToSync.length ? "failed" : "partial";
     await sql`
       UPDATE ops.sync_runs
          SET finished_at = now(),
