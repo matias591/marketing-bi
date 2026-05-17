@@ -31,8 +31,6 @@ export default async function FunnelPage({
     fromDate: dateRange.from,
     toDate: dateRange.to,
   };
-  const filterKey = JSON.stringify(queryArgs);
-
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-5">
       <header>
@@ -48,7 +46,7 @@ export default async function FunnelPage({
         <FilterBarSection model={filters.model} preset={filters.preset} types={types} />
       </Suspense>
 
-      <Suspense key={filterKey} fallback={<FunnelSkeleton />}>
+      <Suspense fallback={<FunnelSkeleton />}>
         <FunnelSection args={queryArgs} />
       </Suspense>
     </div>

@@ -48,8 +48,6 @@ export default async function CampaignsPage({
     toDate: dateRange.to,
     campaignTypes: types,
   };
-  const filterKey = JSON.stringify({ ...queryArgs, compare });
-
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-5">
       <header>
@@ -72,15 +70,15 @@ export default async function CampaignsPage({
         />
       </Suspense>
 
-      <Suspense key={`top-${filterKey}`} fallback={<ChartCardSkeleton title="Top campaigns" />}>
+      <Suspense fallback={<ChartCardSkeleton title="Top campaigns" />}>
         <TopCampaignsCard args={queryArgs} compare={compare} />
       </Suspense>
 
-      <Suspense key={`type-${filterKey}`} fallback={<ChartCardSkeleton title="Credit by campaign type" />}>
+      <Suspense fallback={<ChartCardSkeleton title="Credit by campaign type" />}>
         <TypeRollupCard args={queryArgs} compare={compare} />
       </Suspense>
 
-      <Suspense key={`conv-${filterKey}`} fallback={<ChartCardSkeleton title="Engagement → SQL conversion rate" />}>
+      <Suspense fallback={<ChartCardSkeleton title="Engagement → SQL conversion rate" />}>
         <ConversionRateCard args={queryArgs} />
       </Suspense>
     </div>

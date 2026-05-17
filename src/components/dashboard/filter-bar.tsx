@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
-import { useTransition } from "react";
+import { useTransition, useState, useEffect } from "react";
 import { ATTRIBUTION_MODELS, DATE_PRESETS, type AttributionModel, type DatePreset } from "@/lib/dashboard-filters";
 import { cn } from "@/lib/utils";
 
@@ -39,86 +39,113 @@ export function FilterBar({ model, preset, types, availableTypes, compare }: Fil
   const sp = useSearchParams();
   const [pending, startTransition] = useTransition();
 
-  function setParam(key: string, value: string | null) {
+  // Local state gives instant visual feedback before the RSC round-trip completes.
+  const [localModel, setLocalModel] = useState(model);
+  const [localPreset, setLocalPreset] = useState(preset);
+  const [localTypes, setLocalTypes] = useState(types);
+  const [localCompare, setLocalCompare] = useState(compare);
+
+  // Sync local state once the server response lands (props update).
+  useEffect(() => { setLocalModel(model); }, [model]);
+  useEffect(() => { setLocalPreset(preset); }, [preset]);
+  useEffect(() => { setLocalTypes(types); }, [types]);
+  useEffect(() => { setLocalCompare(compare); }, [compare]);
+
+  function pushParams(updates: Record<string, string | null>) {
     const next = new URLSearchParams(sp.toString());
-    if (value === null || value === "") next.delete(key);
-    else next.set(key, value);
+    for (const [key, value] of Object.entries(updates)) {
+      if (value === null || value === "") next.delete(key);
+      else next.set(key, value);
+    }
     startTransition(() => {
       router.replace(`${pathname}?${next.toString()}`, { scroll: false });
     });
   }
 
-  function toggleType(t: string) {
-    const set = new Set(types ?? []);
+  function handleModel(m: AttributionModel) {
+    setLocalModel(m);
+    setLocalCompare(false);
+    pushParams({ model: m, compare: null });
+  }
+
+  function handlePreset(p: DatePreset) {
+    setLocalPreset(p);
+    pushParams({ preset: p });
+  }
+
+  function handleCompare() {
+    const next = !localCompare;
+    setLocalCompare(next);
+    pushParams({ compare: next ? "1" : null });
+  }
+
+  function handleToggleType(t: string) {
+    const set = new Set(localTypes ?? []);
     if (set.has(t)) set.delete(t);
     else set.add(t);
-    setParam("types", set.size === 0 ? null : Array.from(set).join(","));
+    const newTypes = set.size === 0 ? null : Array.from(set);
+    setLocalTypes(newTypes);
+    pushParams({ types: newTypes ? newTypes.join(",") : null });
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-3 rounded-md border bg-(--color-surface) px-3 py-2 text-xs">
-      {/* Date preset */}
-      <FilterGroup label="Date">
-        {DATE_PRESETS.filter((p) => p !== "custom").map((p) => (
-          <PillButton key={p} active={preset === p} onClick={() => setParam("preset", p)}>
-            {PRESET_LABELS[p]}
-          </PillButton>
-        ))}
-      </FilterGroup>
-
-      <FilterGroup label="Model">
-        {ATTRIBUTION_MODELS.map((m) => (
-          <PillButton
-            key={m}
-            active={!compare && model === m}
-            onClick={() => {
-              // Selecting a single model exits compare mode.
-              const next = new URLSearchParams(sp.toString());
-              next.set("model", m);
-              next.delete("compare");
-              startTransition(() => {
-                router.replace(`${pathname}?${next.toString()}`, { scroll: false });
-              });
-            }}
-          >
-            {MODEL_LABELS[m]}
-          </PillButton>
-        ))}
-        <PillButton
-          active={compare}
-          onClick={() => setParam("compare", compare ? null : "1")}
-        >
-          Compare all
-        </PillButton>
-      </FilterGroup>
-
-      {availableTypes.length > 0 ? (
-        <FilterGroup label="Type">
-          {availableTypes.slice(0, 8).map((t) => (
-            <PillButton
-              key={t}
-              active={types?.includes(t) ?? false}
-              onClick={() => toggleType(t)}
-            >
-              {t}
+    <>
+      {/* Thin top-of-viewport progress bar while RSC round-trip is in flight */}
+      {pending && (
+        <div className="fixed inset-x-0 top-0 z-50 h-0.5 animate-pulse bg-blue-500" />
+      )}
+      <div className="flex flex-wrap items-center gap-3 rounded-md border bg-(--color-surface) px-3 py-2 text-xs">
+        <FilterGroup label="Date">
+          {DATE_PRESETS.filter((p) => p !== "custom").map((p) => (
+            <PillButton key={p} active={localPreset === p} onClick={() => handlePreset(p)}>
+              {PRESET_LABELS[p]}
             </PillButton>
           ))}
-          {types && types.length > 0 ? (
-            <button
-              onClick={() => setParam("types", null)}
-              className="rounded-full px-2 py-0.5 text-(--color-text-muted) hover:text-(--color-text)"
-              type="button"
-            >
-              clear
-            </button>
-          ) : null}
         </FilterGroup>
-      ) : null}
 
-      <div className="ml-auto text-[10px] text-(--color-text-muted)">
-        {pending ? "Updating…" : null}
+        <FilterGroup label="Model">
+          {ATTRIBUTION_MODELS.map((m) => (
+            <PillButton
+              key={m}
+              active={!localCompare && localModel === m}
+              onClick={() => handleModel(m)}
+            >
+              {MODEL_LABELS[m]}
+            </PillButton>
+          ))}
+          <PillButton active={localCompare} onClick={handleCompare}>
+            Compare all
+          </PillButton>
+        </FilterGroup>
+
+        {availableTypes.length > 0 ? (
+          <FilterGroup label="Type">
+            {availableTypes.slice(0, 8).map((t) => (
+              <PillButton
+                key={t}
+                active={localTypes?.includes(t) ?? false}
+                onClick={() => handleToggleType(t)}
+              >
+                {t}
+              </PillButton>
+            ))}
+            {localTypes && localTypes.length > 0 ? (
+              <button
+                onClick={() => { setLocalTypes(null); pushParams({ types: null }); }}
+                className="rounded-full px-2 py-0.5 text-(--color-text-muted) hover:text-(--color-text)"
+                type="button"
+              >
+                clear
+              </button>
+            ) : null}
+          </FilterGroup>
+        ) : null}
+
+        <div className="ml-auto text-[10px] text-(--color-text-muted)">
+          {pending ? "Updating…" : null}
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 

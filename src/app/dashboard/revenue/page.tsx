@@ -55,8 +55,6 @@ export default async function RevenuePage({
     toDate: dateRange.to,
     campaignTypes: types,
   };
-  const filterKey = JSON.stringify({ ...queryArgs, compare });
-
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-5">
       <header>
@@ -74,15 +72,15 @@ export default async function RevenuePage({
         <FilterBarSection model={filters.model} preset={filters.preset} types={types} compare={compare} />
       </Suspense>
 
-      <Suspense key={`headline-${filterKey}`} fallback={<HeadlineSkeleton />}>
+      <Suspense fallback={<HeadlineSkeleton />}>
         <HeadlineRow args={queryArgs} />
       </Suspense>
 
-      <Suspense key={`bycamp-${filterKey}`} fallback={<ChartCardSkeleton title="Top campaigns by revenue" />}>
+      <Suspense fallback={<ChartCardSkeleton title="Top campaigns by revenue" />}>
         <RevenueByCampaignCard args={queryArgs} compare={compare} />
       </Suspense>
 
-      <Suspense key={`bytype-${filterKey}`} fallback={<ChartCardSkeleton title="Revenue by campaign type" />}>
+      <Suspense fallback={<ChartCardSkeleton title="Revenue by campaign type" />}>
         <RevenueByTypeCard args={queryArgs} compare={compare} />
       </Suspense>
     </div>

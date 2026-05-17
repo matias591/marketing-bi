@@ -6,6 +6,7 @@ import { profiles } from "@/db/schema/public";
 import { Sidebar } from "@/components/dashboard/sidebar";
 import { UserMenu } from "@/components/dashboard/user-menu";
 import { FreshnessPill } from "@/components/dashboard/freshness-pill";
+import { Providers } from "@/app/providers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -58,7 +59,9 @@ export default async function DashboardLayout({
           </div>
           <UserMenu email={profile.email} role={profile.role} />
         </header>
-        <main className="flex-1 overflow-auto bg-(--color-bg) px-4 py-4">{children}</main>
+        <main className="flex-1 overflow-auto bg-(--color-bg) px-4 py-4">
+          <Providers>{children}</Providers>
+        </main>
       </div>
     </div>
   );
